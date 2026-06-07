@@ -1,0 +1,97 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+dist/
+build/
+.env
+.env.*
+*.spec
+*.log
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.tox/
+
+# Python virtual environments
+venv/
+env/
+ENV/
+env_bak/
+.venv/
+env_vibe/
+
+# Rust
+target/
+**/target/
+vibe_pilot_rust/target/
+Cargo.lock
+
+# OS
+.DS_Store
+Thumbs.db
+*.lnk
+*.log
+*.png
+*.tmp
+*.bak
+.env
+.env.*
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg
+*.egg-info/
+build/
+dist/
+*.spec
+.coverage
+htmlcov/
+.pytest_cache/
+.mypy_cache/
+.tox/
+
+# Python virtual environments
+venv/
+env/
+ENV/
+env_bak/
+.venv/
+env_vibe/
+
+# Rust
+target/
+**/target/
+vibe_pilot_rust/target/
+Cargo.lock
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# Config (local overrides)
+bootstrap.enc
+save.enc
+engines.enc
+sauvegarde_generique.enc
+moteurs_presets.enc
+
+# Profile configs (user data)
+**/profiles/*.enc
+
+# Kilo AI
+.kilo/
+
+# OS
+.DS_Store
+Thumbs.db

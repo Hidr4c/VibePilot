@@ -1,0 +1,66 @@
+[package]
+name = "vibepilot"
+version = "1.0.0"
+edition = "2021"
+description = "Visual AI automation orchestrator - Rust port"
+license = "MIT"
+repository = "https://github.com/YOUR_USERNAME/vibe-pilot"
+
+[dependencies]
+# GUI: egui for immediate-mode, cross-platform, lightweight UI
+egui = "0.31"
+eframe = { version = "0.31", features = ["default_fonts", "wayland"] }
+egui_extras = { version = "0.31", features = ["serde"] }
+
+# HTTP client for LLM API
+reqwest = { version = "0.12", features = ["json", "stream"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+# Screen capture (native Windows API via windows crate)
+
+# Mouse/keyboard control
+rdev = "0.5"
+
+# Clipboard
+arboard = "3.4"
+
+# File system / config
+toml = "0.8"
+dirs = "5"
+rfd = "0.15"
+
+# Image processing
+image = { version = "0.25", features = ["png"] }
+base64 = "0.22"
+
+# Async runtime
+tokio = { version = "1", features = ["full"] }
+
+# Logging
+log = "0.4"
+env_logger = "0.11"
+chrono = "0.4"
+
+# Threading
+flume = "0.11"
+
+[dependencies.windows]
+version = "0.58"
+features = [
+    "Win32_Foundation",
+    "Win32_UI_WindowsAndMessaging",
+    "Win32_UI_Controls",
+    "Win32_UI_Input",
+    "Win32_Graphics_Gdi",
+    "Win32_System_LibraryLoader",
+    "Win32_System_Threading",
+    "Win32_Storage_FileSystem",
+]
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

@@ -1,0 +1,110 @@
+name: Release
+
+on:
+  push:
+    branches: [release/*]
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version number (e.g., 1.1.0)'
+        required: true
+        type: string
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  build-and-release:
+    runs-on: windows-latest
+    defaults:
+      run:
+        shell: pwsh
+        working-directory: vibe_pilot_rust
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          submodules: recursive
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: stable-x86_64-pc-windows-msvc
+          components: rustfmt, clippy
+
+      - name: Cache cargo registry
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cargo/registry
+            ~/.cargo/git
+            target
+          key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
+
+      - name: Run clippy
+        run: cargo clippy -- -D warnings
+
+      - name: Run tests
+        run: cargo test -- --nocapture
+
+      - name: Build release binary
+        run: |
+          cargo build --release --verbose
+          $hash = (git rev-parse --short HEAD)
+          $version = "${{ github.event.inputs.version }}"
+          if (-not $version) { $version = (git describe --tags --abbrev=0 2>$null) }
+          if (-not $version) { $version = "dev-$hash" }
+          echo "VERSION=$version" | Out-File -FilePath $env:GITHUB_ENV -Append
+          echo "HASH=$hash" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Create dist folder
+        run: |
+          New-Item -ItemType Directory -Path "target/release/dist" -Force
+          Copy-Item "target/release/vibepilot.exe" "target/release/dist/"
+          @"
+          # VibePilot v${{ env.VERSION }}
+
+          Visual AI Automation Orchestrator for Windows.
+
+          ## Installation
+          1. Download `vibepilot.exe`
+          2. Run directly (no installer needed)
+
+          ## Requirements
+          - Windows 10/11
+          - A local LLM server (LM Studio, Ollama, or OpenAI-compatible API)
+
+          ## License
+          MIT
+          "@ | Out-File -FilePath "target/release/dist/README.txt" -Encoding UTF8
+
+      - name: Create GitHub Release
+        id: create_release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: "VibePilot v${{ env.VERSION }}"
+          tag_name: "${{ env.VERSION }}"
+          body: |
+            ## VibePilot v${{ env.VERSION }}
+            
+            Windows Visual AI Automation tool.
+            
+            ### What's included
+            - `vibepilot.exe` — Single binary, no installer
+            - `README.txt` — Quick start guide
+            
+            ### Requirements
+            - Windows 10/11
+            - Local LLM server (LM Studio, Ollama, or OpenAI-compatible API)
+            
+            ### Build info
+            - Commit: ${{ env.HASH }}
+            - Built: ${{ github.run_created_at }}
+          files: vibe_pilot_rust/target/release/dist/*
+          draft: false
+          prerelease: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
