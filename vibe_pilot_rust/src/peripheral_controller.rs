@@ -67,8 +67,9 @@ impl PeripheralController {
     }
 
     /// Execute a physical action based on the LLM decision.
-    pub fn execute_action(&self, payload: &ActionPayload, offsets: &[ScreenOffset]) {
+    pub fn execute_action(&self, payload: &ActionPayload, offsets: &[ScreenOffset], verifier_placement_souris: bool) {
         use rdev::{simulate, EventType, Key};
+        #[cfg(not(target_os = "windows"))]
         use windows::Win32::UI::WindowsAndMessaging::SetCursorPos;
 
         let x_rel = payload.relative_click_position.get(0).copied().unwrap_or(0.5);
@@ -76,18 +77,46 @@ impl PeripheralController {
 
         let (abs_x, abs_y) = self.compute_absolute_coordinates(x_rel, y_rel, offsets);
 
-        // Move cursor to position
+        // Move cursor to position using SendInput on Windows for absolute virtual desktop mapping
+        #[cfg(target_os = "windows")]
+        {
+            win32_move_mouse_absolute(abs_x, abs_y);
+        }
+        #[cfg(not(target_os = "windows"))]
         unsafe {
             let _ = SetCursorPos(abs_x, abs_y);
         }
-        std::thread::sleep(std::time::Duration::from_millis(100));
+        
+        if verifier_placement_souris {
+            std::thread::sleep(std::time::Duration::from_millis(1500));
+        } else {
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+
+        // Re-align cursor to target coordinates in case user moved the mouse during the delay
+        #[cfg(target_os = "windows")]
+        {
+            win32_move_mouse_absolute(abs_x, abs_y);
+        }
+        #[cfg(not(target_os = "windows"))]
+        unsafe {
+            let _ = SetCursorPos(abs_x, abs_y);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(50));
 
         match payload.action.as_str() {
             "CLICK_AND_TYPE" => {
                 // Simulate left click
-                let _ = simulate(&EventType::ButtonPress(rdev::Button::Left));
-                std::thread::sleep(std::time::Duration::from_millis(50));
-                let _ = simulate(&EventType::ButtonRelease(rdev::Button::Left));
+                #[cfg(target_os = "windows")]
+                {
+                    win32_click_current_position();
+                }
+                #[cfg(not(target_os = "windows"))]
+                {
+                    let _ = simulate(&EventType::ButtonPress(rdev::Button::Left));
+                    std::thread::sleep(std::time::Duration::from_millis(50));
+                    let _ = simulate(&EventType::ButtonRelease(rdev::Button::Left));
+                }
                 std::thread::sleep(std::time::Duration::from_millis(100));
 
                 // Paste text via clipboard + Ctrl+V
@@ -134,6 +163,33 @@ impl PeripheralController {
             return (0, 0);
         }
 
+        let mut x_rel = x_rel;
+        let mut y_rel = y_rel;
+
+        // Auto-detect coordinate space (0..1 vs 0..1000 vs pixel space)
+        if x_rel > 1.0 || y_rel > 1.0 {
+            if x_rel <= 1000.0 && y_rel <= 1000.0 && x_rel > 1.0 && y_rel > 1.0 {
+                x_rel /= 1000.0;
+                y_rel /= 1000.0;
+            } else {
+                if x_rel > 1.0 {
+                    let target_w = offsets.get(0).map(|o| o.width).unwrap_or(1920) as f64;
+                    x_rel /= target_w;
+                }
+                if y_rel > 1.0 {
+                    let target_h = offsets.get(0).map(|o| o.height).unwrap_or(1080) as f64;
+                    y_rel /= target_h;
+                }
+            }
+        }
+
+        if offsets.len() == 1 {
+            let target = &offsets[0];
+            let abs_x = target.left + (target.width as f64 * x_rel) as i32;
+            let abs_y = target.top + (target.height as f64 * y_rel) as i32;
+            return (abs_x, abs_y);
+        }
+
         let is_desktop = offsets.len() == 1
             && self.is_desktop_title(&offsets[0].titre);
 
@@ -157,12 +213,7 @@ impl PeripheralController {
 
             let abs_x = min_x + (virtual_width as f64 * x_rel) as i32;
             let abs_y = min_y + (virtual_height as f64 * y_rel) as i32;
-
-            let (screen_w, screen_h) = self.get_screen_size();
-            (
-                abs_x.clamp(0, screen_w - 1),
-                abs_y.clamp(0, screen_h - 1),
-            )
+            (abs_x, abs_y)
         } else {
             let total_height: i32 = offsets.iter().map(|o| o.height + 25).sum();
             let y_phys = (y_rel * total_height as f64) as i32;
@@ -180,12 +231,7 @@ impl PeripheralController {
 
             let abs_x = target.left + (target.width as f64 * x_rel) as i32;
             let abs_y = target.top + (target.height as f64 * y_local_rel) as i32;
-
-            let (screen_w, screen_h) = self.get_screen_size();
-            (
-                abs_x.clamp(0, screen_w - 1),
-                abs_y.clamp(0, screen_h - 1),
-            )
+            (abs_x, abs_y)
         }
     }
 
@@ -207,12 +253,31 @@ impl PeripheralController {
             || t.contains("all screens")
     }
 
-    fn get_screen_size(&self) -> (i32, i32) {
-        use windows::Win32::UI::WindowsAndMessaging::{GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN};
-        unsafe {
-            let cx = GetSystemMetrics(SM_CXSCREEN);
-            let cy = GetSystemMetrics(SM_CYSCREEN);
-            (cx, cy)
+    #[allow(dead_code)]
+    pub(crate) fn get_screen_bounds(&self) -> (i32, i32, i32, i32) {
+        #[cfg(target_os = "windows")]
+        {
+            use windows::Win32::UI::WindowsAndMessaging::{
+                GetSystemMetrics, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN,
+                SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_CXSCREEN, SM_CYSCREEN
+            };
+            unsafe {
+                let left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+                let top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+                let width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+                let height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+                if width == 0 || height == 0 {
+                    let cx = GetSystemMetrics(SM_CXSCREEN);
+                    let cy = GetSystemMetrics(SM_CYSCREEN);
+                    (0, 0, cx, cy)
+                } else {
+                    (left, top, left + width, top + height)
+                }
+            }
+        }
+        #[cfg(not(target_os = "windows"))]
+        {
+            (0, 0, 1920, 1080)
         }
     }
 
@@ -227,5 +292,75 @@ impl PeripheralController {
         if let Ok(mut clip) = arboard::Clipboard::new() {
             let _ = clip.set_text(text);
         }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn win32_move_mouse_absolute(x: i32, y: i32) {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_MOUSE, MOUSEEVENTF_ABSOLUTE, MOUSEEVENTF_MOVE, MOUSEEVENTF_VIRTUALDESK, MOUSEINPUT,
+    };
+    use windows::Win32::UI::WindowsAndMessaging::{
+        GetSystemMetrics, SM_CXVIRTUALSCREEN, SM_CYVIRTUALSCREEN, SM_XVIRTUALSCREEN, SM_YVIRTUALSCREEN
+    };
+
+    unsafe {
+        let v_left = GetSystemMetrics(SM_XVIRTUALSCREEN);
+        let v_top = GetSystemMetrics(SM_YVIRTUALSCREEN);
+        let v_width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+        let v_height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+
+        if v_width <= 1 || v_height <= 1 {
+            return;
+        }
+
+        let norm_x = (((x - v_left) as f64 * 65535.0) / (v_width - 1) as f64) as i32;
+        let norm_y = (((y - v_top) as f64 * 65535.0) / (v_height - 1) as f64) as i32;
+
+        let mut input = INPUT::default();
+        input.r#type = INPUT_MOUSE;
+        input.Anonymous.mi = MOUSEINPUT {
+            dx: norm_x,
+            dy: norm_y,
+            mouseData: 0,
+            dwFlags: MOUSEEVENTF_MOVE | MOUSEEVENTF_ABSOLUTE | MOUSEEVENTF_VIRTUALDESK,
+            time: 0,
+            dwExtraInfo: 0,
+        };
+
+        SendInput(&[input], std::mem::size_of::<INPUT>() as i32);
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn win32_click_current_position() {
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_MOUSE, MOUSEEVENTF_LEFTDOWN, MOUSEEVENTF_LEFTUP, MOUSEINPUT,
+    };
+
+    unsafe {
+        let mut inputs = [INPUT::default(), INPUT::default()];
+
+        inputs[0].r#type = INPUT_MOUSE;
+        inputs[0].Anonymous.mi = MOUSEINPUT {
+            dx: 0,
+            dy: 0,
+            mouseData: 0,
+            dwFlags: MOUSEEVENTF_LEFTDOWN,
+            time: 0,
+            dwExtraInfo: 0,
+        };
+
+        inputs[1].r#type = INPUT_MOUSE;
+        inputs[1].Anonymous.mi = MOUSEINPUT {
+            dx: 0,
+            dy: 0,
+            mouseData: 0,
+            dwFlags: MOUSEEVENTF_LEFTUP,
+            time: 0,
+            dwExtraInfo: 0,
+        };
+
+        SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
     }
 }

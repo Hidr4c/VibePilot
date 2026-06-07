@@ -8,7 +8,7 @@ use crate::app::{VibePilotApp, Tab};
 use crate::event_bus::EventType;
 use eframe::egui;
 
-use components::{render_timeline, render_activity_console, render_status_controls};
+use components::{render_console_and_timeline_split, render_status_controls};
 use global_config::render_config_tab;
 use prompt_editor::render_prompt_editor_tab;
 use setup::render_setup_tab;
@@ -51,6 +51,7 @@ pub fn render_main_window(ctx: &egui::Context, app: &mut VibePilotApp) {
                 (Tab::PromptEditor, app.t("tab_prompts")),
                 (Tab::Help, app.t("tab_quickstart")),
                 (Tab::Setup, app.t("tab_setup")),
+                (Tab::Console, app.t("tab_console")),
             ];
             for (tab_type, tab_label) in tabs {
                 let is_active = app.active_tab == tab_type;
@@ -61,35 +62,22 @@ pub fn render_main_window(ctx: &egui::Context, app: &mut VibePilotApp) {
         });
         ui.separator();
 
-        // Unified ScrollArea covering all the middle contents (active tab, timeline, console)
-        egui::ScrollArea::vertical()
-            .max_width(ui.available_width())
-            .show(ui, |ui| {
-                // Active tab content
-                match app.active_tab {
-                    Tab::GlobalConfig => render_config_tab(ui, app),
-                    Tab::PromptEditor => render_prompt_editor_tab(ui, app),
-                    Tab::Help => render_help_tab(ui, app),
-                    Tab::Setup => render_setup_tab(ui, app),
-                }
-
-                // Hide timeline and logs when we are in the Setup tab
-                if app.active_tab != Tab::Setup {
-                    ui.add_space(8.0);
-                    ui.separator();
-                    ui.add_space(4.0);
-
-                    // Timeline
-                    render_timeline(ui, app);
-                    ui.add_space(8.0);
-
-                    ui.separator();
-                    ui.add_space(4.0);
-
-                    // Logs Console with a clean, readable height
-                    render_activity_console(ui, app, 180.0);
-                }
-            });
+        if app.active_tab == Tab::Console {
+            render_console_and_timeline_split(ui, app, 400.0);
+        } else {
+            // Unified ScrollArea covering all the middle contents (active tab, timeline, console)
+            egui::ScrollArea::vertical()
+                .max_width(ui.available_width())
+                .show(ui, |ui| {
+                    match app.active_tab {
+                        Tab::GlobalConfig => render_config_tab(ui, app),
+                        Tab::PromptEditor => render_prompt_editor_tab(ui, app),
+                        Tab::Help => render_help_tab(ui, app),
+                        Tab::Setup => render_setup_tab(ui, app),
+                        _ => {}
+                    }
+                });
+        }
     });
 
     // Draw confirmation modals if active
@@ -111,6 +99,7 @@ fn render_confirmations(ctx: &egui::Context, app: &mut VibePilotApp) {
                         app.bus.emit(EventType::Log(format!("Profile '{}' deleted", profile_to_delete)));
                         if app.selected_profile == profile_to_delete {
                             app.selected_profile = app.get_first_available_profile_name();
+                            app.current_config.dernier_profil = app.selected_profile.clone();
                         }
                         app.show_delete_confirm = None;
                     }
@@ -143,10 +132,12 @@ fn render_confirmations(ctx: &egui::Context, app: &mut VibePilotApp) {
                     if ui.button(btn_ok).clicked() {
                         let new_name = app.rename_profile_new_name.trim().to_string();
                         if !new_name.is_empty() && new_name != old_name {
-                            if let Some(cfg) = app.config_repo.load_profile(&old_name) {
+                            if let Some(mut cfg) = app.config_repo.load_profile(&old_name) {
+                                cfg.dernier_profil = new_name.clone();
                                 if app.config_repo.save_profile(&new_name, &cfg) {
                                     app.config_repo.delete_profile(&old_name);
                                     app.selected_profile = new_name.clone();
+                                    app.current_config.dernier_profil = new_name.clone();
                                     app.bus.emit(EventType::Log(format!("Profile '{}' renamed to '{}'", old_name, new_name)));
                                 }
                             }
@@ -237,6 +228,24 @@ fn render_confirmations(ctx: &egui::Context, app: &mut VibePilotApp) {
                         if let Ok(mut status) = app.action_confirmation_status.lock() {
                             *status = "cancelled".to_string();
                         }
+                    }
+                });
+            });
+    }
+
+    if let Some(profile_name) = app.show_profile_ready_popup.clone() {
+        let title = app.t("lbl_profile_ready");
+        egui::Window::new(title)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .show(ctx, |ui| {
+                let msg = app.t("msg_profile_ready").replace("{}", &profile_name);
+                ui.label(msg);
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("OK").clicked() {
+                        app.show_profile_ready_popup = None;
                     }
                 });
             });

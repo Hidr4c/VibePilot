@@ -25,13 +25,8 @@ fn render_editor_profile_manager(ui: &mut egui::Ui, app: &mut VibePilotApp) {
                 }
             });
         if selected != app.selected_profile {
-            app.selected_profile = selected.clone();
             if !selected.is_empty() {
-                if let Some(cfg) = app.config_repo.load_profile(&selected) {
-                    app.current_config = cfg.clone();
-                    app.last_saved_config = cfg;
-                    app.bus.emit(EventType::Log(format!("Profile '{}' loaded", selected)));
-                }
+                app.load_profile(&selected);
             }
         }
 
@@ -43,6 +38,7 @@ fn render_editor_profile_manager(ui: &mut egui::Ui, app: &mut VibePilotApp) {
         let btn_save_label = if app.current_config.langue == "Français" { "💾 Sauver" } else { "💾 Save" };
         if ui.button(btn_save_label).on_hover_text(app.t("tip_save_profile")).clicked() {
             if !app.selected_profile.is_empty() {
+                app.current_config.dernier_profil = app.selected_profile.clone();
                 if app.config_repo.save_profile(&app.selected_profile, &app.current_config) {
                     app.last_saved_config = app.current_config.clone();
                     app.bus.emit(EventType::Log(format!("Profile '{}' saved", app.selected_profile)));
@@ -72,11 +68,8 @@ fn render_editor_profile_manager(ui: &mut egui::Ui, app: &mut VibePilotApp) {
         let tip_refresh_profile = if app.current_config.langue == "Français" { "Annuler les modifications et recharger le profil depuis le disque" } else { "Discard changes and reload the profile from disk" };
         if ui.button(btn_refresh_label).on_hover_text(tip_refresh_profile).clicked() {
             if !app.selected_profile.is_empty() {
-                if let Some(cfg) = app.config_repo.load_profile(&app.selected_profile) {
-                    app.current_config = cfg.clone();
-                    app.last_saved_config = cfg;
-                    app.bus.emit(EventType::Log(format!("Profile '{}' reloaded from disk", app.selected_profile)));
-                }
+                let current_profile = app.selected_profile.clone();
+                app.load_profile(&current_profile);
             }
         }
 

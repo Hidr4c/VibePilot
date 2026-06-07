@@ -21,6 +21,13 @@ pub enum EventType {
     ShowActionConfirmation { action: String, text: String, scroll: i32 },
     GetActionConfirmationStatus,
     ClearActionConfirmation,
+    SetGeneratingPrompts(bool),
+    AppendReport(String),
+    UpdateModelsList { engine: String, models: Vec<String> },
+    CreateProfileWithPrompts { profile_name: String, contexte: String, task: String, objectif: String, directives: String },
+    ShowProfileReadyPopup { profile_name: String },
+    GetOrchestratorRunning,
+    GetUserFeedback,
 }
 
 impl fmt::Display for EventType {
@@ -38,6 +45,13 @@ impl fmt::Display for EventType {
             EventType::ShowActionConfirmation { .. } => write!(f, "SHOW_ACTION_CONFIRMATION"),
             EventType::GetActionConfirmationStatus => write!(f, "GET_ACTION_CONFIRMATION_STATUS"),
             EventType::ClearActionConfirmation => write!(f, "CLEAR_ACTION_CONFIRMATION"),
+            EventType::SetGeneratingPrompts(_) => write!(f, "SET_GENERATING_PROMPTS"),
+            EventType::AppendReport(_) => write!(f, "APPEND_REPORT"),
+            EventType::UpdateModelsList { .. } => write!(f, "UPDATE_MODELS_LIST"),
+            EventType::CreateProfileWithPrompts { .. } => write!(f, "CREATE_PROFILE_WITH_PROMPTS"),
+            EventType::ShowProfileReadyPopup { .. } => write!(f, "SHOW_PROFILE_READY_POPUP"),
+            EventType::GetOrchestratorRunning => write!(f, "GET_ORCHESTRATOR_RUNNING"),
+            EventType::GetUserFeedback => write!(f, "GET_USER_FEEDBACK"),
         }
     }
 }

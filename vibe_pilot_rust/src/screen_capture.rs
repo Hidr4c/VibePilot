@@ -6,7 +6,8 @@ use std::sync::Arc;
 use windows::Win32::Foundation::{HWND, RECT, BOOL, LPARAM};
 use windows::Win32::Graphics::Gdi::{
     BitBlt, CreateCompatibleDC, CreateCompatibleBitmap, DeleteDC, DeleteObject, GetDC,
-    ReleaseDC, SelectObject, SRCCOPY,
+    ReleaseDC, SelectObject, SRCCOPY, EnumDisplayMonitors, GetMonitorInfoW, HMONITOR, HDC,
+    MONITORINFO,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, GetClassNameW, GetWindowTextW, GetWindowRect,
@@ -120,11 +121,40 @@ impl ScreenCapturer {
     }
 
     fn detect_monitors() -> Vec<ScreenInfo> {
+        unsafe extern "system" fn monitor_enum_proc(
+            hmonitor: HMONITOR,
+            _hdc: HDC,
+            _rect: *mut RECT,
+            data: LPARAM,
+        ) -> BOOL {
+            let monitors = &mut *(data.0 as *mut Vec<ScreenInfo>);
+            let mut info = MONITORINFO::default();
+            info.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+            if GetMonitorInfoW(hmonitor, &mut info).as_bool() {
+                let bbox = BoundingBox::new(
+                    info.rcMonitor.left,
+                    info.rcMonitor.top,
+                    info.rcMonitor.right - info.rcMonitor.left,
+                    info.rcMonitor.bottom - info.rcMonitor.top,
+                );
+                let name = format!("Screen {}", monitors.len() + 1);
+                monitors.push(ScreenInfo::new(name, bbox));
+            }
+            BOOL(1)
+        }
+
         let mut monitors = Vec::new();
         unsafe {
-            let cx = windows::Win32::UI::WindowsAndMessaging::GetSystemMetrics(windows::Win32::UI::WindowsAndMessaging::SM_CXSCREEN);
-            let cy = windows::Win32::UI::WindowsAndMessaging::GetSystemMetrics(windows::Win32::UI::WindowsAndMessaging::SM_CYSCREEN);
-            monitors.push(ScreenInfo::new("Screen 1".to_string(), BoundingBox::new(0, 0, cx, cy)));
+            let data_ptr = &mut monitors as *mut Vec<ScreenInfo> as isize;
+            let _ = EnumDisplayMonitors(HDC::default(), None, Some(monitor_enum_proc), LPARAM(data_ptr));
+        }
+
+        if monitors.is_empty() {
+            unsafe {
+                let cx = windows::Win32::UI::WindowsAndMessaging::GetSystemMetrics(windows::Win32::UI::WindowsAndMessaging::SM_CXSCREEN);
+                let cy = windows::Win32::UI::WindowsAndMessaging::GetSystemMetrics(windows::Win32::UI::WindowsAndMessaging::SM_CYSCREEN);
+                monitors.push(ScreenInfo::new("Screen 1".to_string(), BoundingBox::new(0, 0, cx, cy)));
+            }
         }
         monitors
     }
@@ -223,7 +253,7 @@ impl ScreenCapturer {
             let bmi_header = windows::Win32::Graphics::Gdi::BITMAPINFOHEADER {
                 biSize: std::mem::size_of::<windows::Win32::Graphics::Gdi::BITMAPINFOHEADER>() as u32,
                 biWidth: bmi.bmWidth,
-                biHeight: bmi.bmHeight,
+                biHeight: -bmi.bmHeight,
                 biPlanes: 1,
                 biBitCount: 32,
                 biCompression: 0,
@@ -243,15 +273,18 @@ impl ScreenCapturer {
                 usage,
             );
 
-            for pixel in buffer.chunks_exact_mut(4) {
+            let mut buffer_mut = buffer;
+            for pixel in buffer_mut.chunks_exact_mut(4) {
                 let temp = pixel[0]; pixel[0] = pixel[2]; pixel[2] = temp;
             }
 
-            let img: RgbaImage = image::ImageBuffer::from_raw(bm_width as u32, bm_height as u32, buffer)?;
+            let img: RgbaImage = image::ImageBuffer::from_raw(bm_width as u32, bm_height as u32, buffer_mut)?;
             ReleaseDC(HWND::default(), hdc_src);
             let _ = DeleteObject(hbitmap);
             let _ = DeleteDC(hdc_mem);
-            Some(DynamicImage::ImageRgba8(img))
+            let dyn_img = DynamicImage::ImageRgba8(img);
+            let _ = dyn_img.save("e:\\Dev\\Projets\\Agent_AI\\last_capture.png");
+            Some(dyn_img)
         }
     }
 

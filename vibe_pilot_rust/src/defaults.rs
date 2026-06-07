@@ -31,6 +31,7 @@ impl DefaultProfileFactory {
             prompt_reprise: Some("Fix the build errors: TS2322 in src/month-view.test.tsx and TS2307 (Cannot find module '@nidex/tool-multilanguage') in src/chat-bubble.tsx, src/chat-history.tsx, and src/chat-input.tsx.".to_string()),
             theme_sombre: true,
             zoom_facteur: None,
+            ..SavedConfig::default()
         }
     }
 
@@ -54,6 +55,7 @@ impl DefaultProfileFactory {
             prompt_reprise: None,
             theme_sombre: true,
             zoom_facteur: None,
+            ..SavedConfig::default()
         }
     }
 }

@@ -2,6 +2,18 @@
 //!
 //! Handles communication with local LLM servers (LM Studio, Ollama, etc.)
 //! for vision-based decision making.
+//!
+//! # Features
+//!
+//! - Vision-based decision protocol: sends screenshots + prompts to LLM
+//! - Prompt field optimization: rewrites individual fields in technical English
+//! - Full configuration generation: creates complete orchestrator config from user request
+//! - Health check: verifies engine availability via HTTP
+//!
+//! # Error Handling
+//!
+//! All public methods return `Result<T, String>` with descriptive error messages.
+//! HTTP errors, JSON parse errors, and missing response fields are all caught.
 
 use serde::{Deserialize, Serialize};
 use base64::Engine;
@@ -13,10 +25,16 @@ use std::io::Cursor;
 pub struct LlmResponse {
     pub status_display: String,
     pub action: String,
+    #[serde(default)]
     pub relative_click_position: Vec<f64>,
+    #[serde(default)]
     pub text_to_type: String,
+    #[serde(default)]
     pub scroll_value: i32,
+    #[serde(default)]
     pub wait_seconds: i32,
+    #[serde(default)]
+    pub report: Option<String>,
 }
 
 /// Request payload for the LLM API.
@@ -60,6 +78,32 @@ impl LlmClient {
         }
     }
 
+    fn apply_auth_and_timeout(
+        &self,
+        mut builder: reqwest::RequestBuilder,
+        auth_mode: &str,
+        auth_api_key: &str,
+        auth_login: &str,
+        auth_password: &str,
+        timeout_secs: u64,
+    ) -> reqwest::RequestBuilder {
+        builder = builder.timeout(std::time::Duration::from_secs(timeout_secs));
+        match auth_mode {
+            "api_key" => {
+                if !auth_api_key.is_empty() {
+                    builder = builder.header("Authorization", format!("Bearer {}", auth_api_key));
+                }
+            }
+            "basic_auth" => {
+                if !auth_login.is_empty() || !auth_password.is_empty() {
+                    builder = builder.basic_auth(auth_login, Some(auth_password));
+                }
+            }
+            _ => {}
+        }
+        builder
+    }
+
     /// Check if the engine is busy (health check).
     pub async fn is_engine_busy(&self, url: &str, _model: &str) -> bool {
         let test_url = if url.ends_with("/chat/completions") {
@@ -69,9 +113,60 @@ impl LlmClient {
         };
 
         match self.client.get(test_url).timeout(std::time::Duration::from_secs(2)).send().await {
-            Ok(resp) => resp.status().is_success(),
+            Ok(resp) => !resp.status().is_success(),
             Err(_) => true, // busy or unreachable
         }
+    }
+
+    /// Fetch list of available models from the engine endpoint.
+    pub async fn fetch_models(
+        &self,
+        url: &str,
+        auth_mode: &str,
+        auth_api_key: &str,
+        auth_login: &str,
+        auth_password: &str,
+    ) -> Result<Vec<String>, String> {
+        let test_url = if url.ends_with("/chat/completions") {
+            url.trim_end_matches("/chat/completions").to_owned() + "/models"
+        } else if url.ends_with("/v1") {
+            url.to_string() + "/models"
+        } else {
+            if url.ends_with('/') {
+                url.to_string() + "v1/models"
+            } else {
+                url.to_string() + "/v1/models"
+            }
+        };
+
+        let req = self.client.get(test_url);
+        let req = self.apply_auth_and_timeout(req, auth_mode, auth_api_key, auth_login, auth_password, 10);
+        let resp = req.send()
+            .await
+            .map_err(|e| format!("Connection error: {}", e))?;
+
+        if !resp.status().is_success() {
+            return Err(format!("HTTP error: {}", resp.status()));
+        }
+
+        let json: serde_json::Value = resp.json()
+            .await
+            .map_err(|e| format!("JSON parse error: {}", e))?;
+
+        let mut models = Vec::new();
+        if let Some(data) = json["data"].as_array() {
+            for m in data {
+                if let Some(id) = m["id"].as_str() {
+                    models.push(id.to_string());
+                }
+            }
+        }
+
+        if models.is_empty() {
+            return Err("No models found in response".to_string());
+        }
+
+        Ok(models)
     }
 
     /// Execute a decision protocol: send screenshot + prompts to the LLM.
@@ -82,8 +177,14 @@ impl LlmClient {
         objectif: &str,
         task: &str,
         directives: &str,
+        user_feedback: &str,
         url: &str,
         model: &str,
+        auth_mode: &str,
+        auth_api_key: &str,
+        auth_login: &str,
+        auth_password: &str,
+        timeout_secs: u64,
     ) -> Result<LlmResponse, String> {
         // Encode image to base64
         let mut buffer = Vec::new();
@@ -94,24 +195,42 @@ impl LlmClient {
 
         let img_base64 = base64::engine::general_purpose::STANDARD.encode(&buffer);
 
+        let feedback_prompt = if !user_feedback.is_empty() {
+            format!("\nUSER INTERACTIVE HINT / DIRECTION:\n'{}'\n(CRITICAL: The user has directly entered this feedback or correction on the console logs. You MUST prioritize and execute based on this hint/direction, even if it contradicts previous instructions or seems counter-intuitive!)\n", user_feedback)
+        } else {
+            String::new()
+        };
+
         let prompt = format!(
             "You are the visual operating mind of this PC (Visual OS Orchestrator).\n\
-             Situation Context: '{}'\n\
-             Global user task: '{}'\n\
-             Stop condition (Do while): '{}'\n\n\
-             Analyze the attached screenshot of the target application with extreme precision.\n\n\
-             CRITICAL OPERATIONAL COMPREHENSION RULES:\n\
-             {}\n\n\
-             You must respond EXCLUSIVELY with a strict JSON object:\n\
-             {{\n\
-               \"status_display\": \"short summary\",\n\
-               \"action\": \"CLICK_AND_TYPE\" | \"SCROLL\" | \"WAIT\" | \"SUCCESS\" | \"FAIL\",\n\
-               \"relative_click_position\": [0.5, 0.5],\n\
-               \"text_to_type\": \"\",\n\
-               \"scroll_value\": -6,\n\
-               \"wait_seconds\": 15\n\
-             }}",
-            contexte, objectif, task, directives
+               Situation Context: '{}'\n\
+               Global user task: '{}'\n\
+               Stop condition (Do while): '{}'\n\
+               Behavioral Directives:\n'{}'\n\
+               {}\n\n\
+               Analyze the attached screenshot of the target application with extreme precision.\n\n\
+               You have access to mouse control actions. You must determine the absolute next step based on the screenshot, context, task, directives, and any user live feedback.\n\n\
+               Coordinate Calibration & Alignment Instructions:\n\
+               - The coordinates are relative to the screenshot image itself (0.0 to 1.0, or 0 to 1000, or raw pixel coordinates like 89.0).\n\
+               - x = 0.0 is the left edge of the screenshot, x = 1.0 is the right edge. x = 0.5 is the exact center horizontally.\n\
+               - y = 0.0 is the top edge, y = 1.0 is the bottom edge. y = 0.5 is the exact center vertically.\n\
+               - If the target element is near the left edge (e.g. bookmarks bar on the left), x MUST be very low (e.g. 0.05 to 0.25). A value like 0.36 is more than one-third of the screen width and lies much further to the right.\n\
+               - In the \"report\" field, you MUST write down a step-by-step calibration analysis before selecting the coordinates:\n\
+                 1. Identify the target element's text/label.\n\
+                 2. Estimate its approximate position as a percentage of the width (e.g., first quarter, middle, third quarter).\n\
+                 3. Explain why the selected relative x coordinate matches that estimation.\n\
+                 4. Check if the vertical y coordinate corresponds to the element's height zone.\n\n\
+               Strict Output format: You must output ONLY a valid JSON object enclosed in double curly braces (or standard markdown json block) with the following fields:\n\
+               - \"status_display\": brief text to show on status bar\n\
+               - \"action\": one of \"CLICK_AND_TYPE\" (if you want to click on coordinate and optionally write/paste text), \"SCROLL\" (if you need to scroll), \"WAIT\" (if the app is loading/busy), \"SUCCESS\" (if the task is accomplished and verified), \"FAIL\" (if the goal is impossible to achieve or blocked)\n\
+               - \"relative_click_position\": [x, y] coordinates (float between 0.0 and 1.0) relative to the screen/target area, or [0.0, 0.0] if not clicking\n\
+               - \"text_to_type\": string to write/paste after click, or empty if not writing\n\
+               - \"scroll_value\": positive integer to scroll up, negative to scroll down, or 0 if not scrolling\n\
+               - \"wait_seconds\": integer (e.g. 5, 15) to pause after action, recommended 10-15s for stability\n\
+               - \"report\": a mandatory detailed analysis report containing your visual calibration steps and logic.\n\n\
+               Let's proceed.\n\n\
+               JSON response:",
+            contexte, objectif, task, directives, feedback_prompt
         );
 
         let request = LlmRequest {
@@ -136,13 +255,11 @@ impl LlmClient {
             temperature: 0.1,
         };
 
-        let response = self
-            .client
-            .post(url)
+        let req = self.client.post(url)
             .header("Content-Type", "application/json")
-            .json(&request)
-            .timeout(std::time::Duration::from_secs(60))
-            .send()
+            .json(&request);
+        let req = self.apply_auth_and_timeout(req, auth_mode, auth_api_key, auth_login, auth_password, timeout_secs);
+        let response = req.send()
             .await
             .map_err(|e| format!("HTTP error: {}", e))?;
 
@@ -157,11 +274,24 @@ impl LlmClient {
 
         let content = body["choices"][0]["message"]["content"]
             .as_str()
-            .ok_or("No content in response")?;
+            .ok_or_else(|| "No content in response".to_string())?;
 
-        // Parse JSON response
-        let response: LlmResponse = serde_json::from_str(content)
-            .map_err(|e| format!("LLM response parse error: {}", e))?;
+        // Strip markdown code blocks if present (common with LLM responses)
+        let content = strip_markdown_code_blocks(content);
+
+        // Parse JSON response with validation
+        let response: LlmResponse = serde_json::from_str(&content)
+            .map_err(|e| format!("LLM response parse error: {} (raw: {})", e, &content[..content.len().min(200)]))?;
+
+        // Validate required fields
+        if response.action.is_empty() {
+            return Err("LLM response missing 'action' field".to_string());
+        }
+
+        let valid_actions = ["CLICK_AND_TYPE", "SCROLL", "WAIT", "SUCCESS", "FAIL"];
+        if !valid_actions.contains(&response.action.as_str()) {
+            return Err(format!("LLM returned unknown action: '{}'. Expected one of: {:?}", response.action, valid_actions));
+        }
 
         Ok(response)
     }
@@ -173,12 +303,18 @@ impl LlmClient {
         field_type: &str,
         url: &str,
         model: &str,
+        auth_mode: &str,
+        auth_api_key: &str,
+        auth_login: &str,
+        auth_password: &str,
+        timeout_secs: u64,
     ) -> Result<String, String> {
         let system_prompt = match field_type {
             "contexte" => crate::content::PROMPT_OPTIMIZE_CONTEXT,
             "objectif" => crate::content::PROMPT_OPTIMIZE_OBJECTIF,
             "task" => crate::content::PROMPT_OPTIMIZE_TASK,
             "directives" => crate::content::PROMPT_OPTIMIZE_DIRECTIVES,
+            "user_feedback" => crate::content::PROMPT_OPTIMIZE_FEEDBACK,
             _ => "You are an expert Prompt Engineer. Optimize this text.",
         };
 
@@ -205,13 +341,11 @@ impl LlmClient {
             temperature: 0.3,
         };
 
-        let response = self
-            .client
-            .post(url)
+        let req = self.client.post(url)
             .header("Content-Type", "application/json")
-            .json(&request)
-            .timeout(std::time::Duration::from_secs(40))
-            .send()
+            .json(&request);
+        let req = self.apply_auth_and_timeout(req, auth_mode, auth_api_key, auth_login, auth_password, timeout_secs);
+        let response = req.send()
             .await
             .map_err(|e| format!("HTTP error: {}", e))?;
 
@@ -239,6 +373,11 @@ impl LlmClient {
         user_request: &str,
         url: &str,
         model: &str,
+        auth_mode: &str,
+        auth_api_key: &str,
+        auth_login: &str,
+        auth_password: &str,
+        timeout_secs: u64,
     ) -> Result<serde_json::Value, String> {
         let request = LlmRequest {
             model: model.to_string(),
@@ -266,13 +405,11 @@ impl LlmClient {
             temperature: 0.3,
         };
 
-        let response = self
-            .client
-            .post(url)
+        let req = self.client.post(url)
             .header("Content-Type", "application/json")
-            .json(&request)
-            .timeout(std::time::Duration::from_secs(50))
-            .send()
+            .json(&request);
+        let req = self.apply_auth_and_timeout(req, auth_mode, auth_api_key, auth_login, auth_password, timeout_secs);
+        let response = req.send()
             .await
             .map_err(|e| format!("HTTP error: {}", e))?;
 
@@ -375,8 +512,14 @@ mod tests {
             "obj",
             "task",
             "dirs",
+            "",
             "http://127.0.0.1:65535/chat/completions",
-            "model"
+            "model",
+            "none",
+            "",
+            "",
+            "",
+            120
         ).await;
         assert!(res.is_err());
     }
@@ -388,7 +531,12 @@ mod tests {
             "some text",
             "contexte",
             "http://127.0.0.1:65535/chat/completions",
-            "model"
+            "model",
+            "none",
+            "",
+            "",
+            "",
+            120
         ).await;
         assert!(res.is_err());
     }
@@ -399,7 +547,12 @@ mod tests {
         let res = client.generate_config(
             "user request",
             "http://127.0.0.1:65535/chat/completions",
-            "model"
+            "model",
+            "none",
+            "",
+            "",
+            "",
+            120
         ).await;
         assert!(res.is_err());
     }

@@ -164,6 +164,12 @@ mod config_tests {
         assert!(!config.moteur.is_empty());
         assert!(!config.url_api.is_empty());
         assert!(!config.nom_modele.is_empty());
+        assert!(!config.url_api_vision.is_empty());
+        assert!(!config.nom_modele_vision.is_empty());
+        assert!(!config.moteur_vision.is_empty());
+        assert!(!config.auth_mode_vision.is_empty());
+        assert_eq!(config.request_timeout_secs_vision, 120);
+        assert_eq!(config.utiliser_moteur_vision_dedie, false);
         cleanup("all_fields");
     }
 
@@ -453,6 +459,38 @@ mod peripheral_controller_tests {
         assert!(!controller.is_desktop_title("Firefox"));
         assert!(!controller.is_desktop_title("Explorer"));
     }
+
+    #[test]
+    fn test_get_screen_bounds() {
+        let capturer = ScreenCapturer::new();
+        let controller = PeripheralController::new(std::sync::Arc::new(capturer));
+        let (left, top, right, bottom) = controller.get_screen_bounds();
+        assert!(right > left);
+        assert!(bottom > top);
+    }
+
+    #[test]
+    fn test_coordinate_clamping_virtual_bounds() {
+        let capturer = ScreenCapturer::new();
+        let controller = PeripheralController::new(std::sync::Arc::new(capturer));
+
+        // Test with custom off-primary coordinates simulating screen 2
+        let offsets = vec![
+            ScreenOffset {
+                titre: "Screen 2".to_string(),
+                left: 1920,
+                top: 0,
+                width: 1920,
+                height: 1080,
+                y_offset: 0,
+            }
+        ];
+
+        let (x, y) = controller.compute_absolute_coordinates(0.5, 0.5, &offsets);
+        // Should click in the center of Screen 2 (1920 + 960 = 2880)
+        assert!(x >= 1920);
+        assert!(y >= 0);
+    }
 }
 
 mod screen_capture_tests {
@@ -539,7 +577,7 @@ mod screen_capture_tests {
 
 mod orchestrator_tests {
     use crate::config::{ConfigRepository, SavedConfig};
-    use crate::event_bus::EventBus;
+    use crate::event_bus::{EventBus, EventType};
     use crate::orchestrator::VibePilotOrchestrator;
     use std::sync::Arc;
 
@@ -596,6 +634,84 @@ mod orchestrator_tests {
         ));
         let _orch = VibePilotOrchestrator::new(config_repo, bus);
         // Verify no panic on creation; pause mode defaults to false
+    }
+
+    #[test]
+    fn test_orchestrator_running_query() {
+        let (bus, _rx) = EventBus::new();
+        let config_repo = Arc::new(ConfigRepository::new(
+            std::env::temp_dir().join("vibepilot_test_orch4"),
+        ));
+        let orch = VibePilotOrchestrator::new(config_repo, bus.clone());
+        
+        // Register running handler
+        let running_status = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+        let running_status_clone = running_status.clone();
+        bus.register_query(
+            EventType::GetOrchestratorRunning,
+            Box::new(move |_| {
+                if running_status_clone.load(std::sync::atomic::Ordering::Relaxed) {
+                    "true".to_string()
+                } else {
+                    "false".to_string()
+                }
+            }),
+        );
+
+        assert!(!orch.is_running());
+        
+        running_status.store(true, std::sync::atomic::Ordering::Relaxed);
+        assert!(orch.is_running());
+    }
+
+    #[test]
+    fn test_is_local_url() {
+        use crate::orchestrator::is_local_url;
+        assert!(is_local_url("http://localhost:1234/v1"));
+        assert!(is_local_url("http://127.0.0.1:8000/v1"));
+        assert!(is_local_url("http://[::1]:1234"));
+        assert!(!is_local_url("https://api.openai.com/v1"));
+    }
+
+    #[test]
+    fn test_get_target_offsets_empty() {
+        let (bus, _rx) = EventBus::new();
+        let config_repo = Arc::new(ConfigRepository::new(
+            std::env::temp_dir().join("orch_test_offsets"),
+        ));
+        let orch = VibePilotOrchestrator::new(config_repo, bus);
+        let config = SavedConfig::default();
+        let offsets = orch.get_target_offsets(&config);
+        assert!(!offsets.is_empty());
+    }
+
+    #[tokio::test]
+    async fn test_orchestrator_wait_if_user_active_disabled() {
+        let (bus, _rx) = EventBus::new();
+        let dir = std::env::temp_dir().join("orch_test_wait_active");
+        let _ = std::fs::create_dir_all(&dir);
+        let config_repo = Arc::new(ConfigRepository::new(dir.clone()));
+
+        // Save a config with detecter_activite_utilisateur = false
+        let config = SavedConfig {
+            detecter_activite_utilisateur: false,
+            ..SavedConfig::default()
+        };
+        config_repo.save_config(&config);
+
+        let orch = VibePilotOrchestrator::new(config_repo, bus);
+        
+        // This should return immediately because detecter_activite_utilisateur is false
+        let result = tokio::time::timeout(std::time::Duration::from_millis(500), orch.wait_if_user_active()).await;
+        assert!(result.is_ok());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_is_user_active_now_returns_bool() {
+        let _active = crate::ui::components::is_user_active_now();
+        // Since we don't simulate real user actions in tests, we just check that it runs without panic
     }
 }
 
@@ -721,6 +837,44 @@ mod app_state_tests {
         assert_eq!(app.current_config.activer_son, true);
         assert_eq!(app.current_config.auto_validate, true);
         cleanup("app_state_creation");
+    }
+
+    #[test]
+    fn test_app_load_profile_resets_session() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        let egui_ctx = egui::Context::default();
+        let dir = temp_dir("app_load_profile_resets");
+        let _ = std::fs::create_dir_all(&dir);
+        
+        let mut app = VibePilotApp::new(&egui_ctx);
+        
+        // Setup mock profile on disk
+        let config = crate::config::SavedConfig {
+            contexte: "profile context".to_string(),
+            ..crate::config::SavedConfig::default()
+        };
+        app.config_repo.save_profile("reset_test_profile", &config);
+
+        // Put some data into the active session
+        app.action_history.push(("CLICK".to_string(), "c".to_string()));
+        app.logs.push("Log message".to_string());
+        app.report_content = "some report".to_string();
+        app.status_text = "Running".to_string();
+        app.status_color = "green".to_string();
+        app.is_running = true;
+
+        // Load profile and verify it resets the session
+        assert!(app.load_profile("reset_test_profile"));
+        app.poll_events();
+        assert_eq!(app.action_history.len(), 0);
+        assert_eq!(app.logs.len(), 1); // Only the "Profile loaded. Session reset." log is present
+        assert_eq!(app.report_content, "");
+        assert_eq!(app.status_text, "Ready");
+        assert_eq!(app.status_color, "grey");
+        assert_eq!(app.is_running, false);
+        assert_eq!(app.current_config.contexte, "profile context");
+
+        cleanup("app_load_profile_resets");
     }
 
     #[test]
@@ -1064,9 +1218,16 @@ mod app_state_tests {
         app.current_config.demande_generique = "a generic prompt request".to_string();
 
         // Run prompt generator simulation
-        app.generate_prompts_from_request();
+        app.bus.emit(crate::event_bus::EventType::CreateProfileWithPrompts {
+            profile_name: "profile_custom_qs".to_string(),
+            contexte: "c".to_string(),
+            task: "t".to_string(),
+            objectif: "o".to_string(),
+            directives: "d".to_string(),
+        });
+        app.poll_events();
 
-        // selected_profile should immediately switch to "profile_custom_qs"
+        // selected_profile should switch to "profile_custom_qs"
         assert_eq!(app.selected_profile, "profile_custom_qs");
 
         // The new profile config file should exist

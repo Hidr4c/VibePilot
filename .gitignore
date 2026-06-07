@@ -85,9 +85,14 @@ save.enc
 engines.enc
 sauvegarde_generique.enc
 moteurs_presets.enc
+sauvegarde_generique.json
+moteurs_presets.json
 
 # Profile configs (user data)
 **/profiles/*.enc
+
+# Release binaries
+release-zip/
 
 # Kilo AI
 .kilo/

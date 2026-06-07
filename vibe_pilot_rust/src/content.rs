@@ -159,6 +159,19 @@ pub fn lexicon_fr() -> std::collections::HashMap<&'static str, &'static str> {
     map.insert("btn_del_engine", "🗑️");
     map.insert("btn_add_window", "➕");
     map.insert("btn_refresh_windows", "🔄");
+    map.insert("lbl_auth_mode", "Authentification :");
+    map.insert("lbl_api_key", "Clé API :");
+    map.insert("lbl_auth_login", "Identifiant :");
+    map.insert("lbl_auth_password", "Mot de passe :");
+    map.insert("lbl_request_timeout", "Timeout Requête (sec) :");
+    map.insert("lbl_auth_none", "Aucune");
+    map.insert("lbl_auth_api_key", "Clé API");
+    map.insert("lbl_auth_basic", "Auth Basique");
+    map.insert("lbl_profile_ready", "Profil Créé !");
+    map.insert("msg_profile_ready", "Les prompts ont été générés et le profil '{}' est prêt.");
+    map.insert("chk_verify_cursor", "🔍 Vérifier le placement du curseur avant clic ou écriture");
+    map.insert("chk_detect_activity", "⏸ Pause auto si l'utilisateur est actif (souris/clavier)");
+    map.insert("status_user_active", "Utilisateur actif - En attente...");
     map
 }
 
@@ -324,6 +337,19 @@ pub fn lexicon_en() -> std::collections::HashMap<&'static str, &'static str> {
     map.insert("btn_del_engine", "🗑️");
     map.insert("btn_add_window", "➕");
     map.insert("btn_refresh_windows", "🔄");
+    map.insert("lbl_auth_mode", "Authentication:");
+    map.insert("lbl_api_key", "API Key:");
+    map.insert("lbl_auth_login", "Username:");
+    map.insert("lbl_auth_password", "Password:");
+    map.insert("lbl_request_timeout", "Request Timeout (sec):");
+    map.insert("lbl_auth_none", "None");
+    map.insert("lbl_auth_api_key", "API Key");
+    map.insert("lbl_auth_basic", "Basic Auth");
+    map.insert("lbl_profile_ready", "Profile Created!");
+    map.insert("msg_profile_ready", "The prompts are generated and the profile '{}' is ready.");
+    map.insert("chk_verify_cursor", "🔍 Verify cursor placement before click or write");
+    map.insert("chk_detect_activity", "⏸ Auto-pause on user activity (mouse/keyboard)");
+    map.insert("status_user_active", "User active - Waiting...");
     map
 }
 
@@ -346,6 +372,10 @@ pub const PROMPT_OPTIMIZE_DIRECTIVES: &str =
     "You are an expert Prompt Engineer. Take the raw operational rules and rewrite them into a structured, clear list of conditional rules (bullet points) in English for a Vision LLM to follow on screen.\n\
      Keep them highly operational. Return ONLY the final optimized bullet list in English without markdown.";
 
+pub const PROMPT_OPTIMIZE_FEEDBACK: &str =
+    "You are an expert Prompt Engineer. Take the user's raw operational feedback, correction, or hint for an automation task and rewrite it into a clear, concise, highly precise instruction in English for a Vision LLM to execute.\n\
+     Keep it short and extremely actionable. Return ONLY the final optimized text in crisp English without markdown or quotes.";
+
 pub const PROMPT_GLOBAL_GENERATION: &str =
     "You are an expert AI Architect and Prompt Engineer.\n\
      Your role is to translate a simple user request into a complete, structured configuration for a visual AI automation agent (Qwen-VL).\n\n\
@@ -353,5 +383,5 @@ pub const PROMPT_GLOBAL_GENERATION: &str =
      1. \"contexte\": A clear, concise description in English of the operating environment, OS, active tools, and initial setup state.\n\
      2. \"objectif\": A precise, visually verifiable logical condition in English representing the final success state.\n\
      3. \"task\": A clear, high-level directive in English explaining to the AI how to pilot the target application's interface to accomplish the goal.\n\
-     4. \"directives\": A structured, clear bulleted list in English detailing the specific conditional system rules.\n\n\
+     4. \"directives\": A structured, clear bulleted list in English detailing the specific conditional system rules. You MUST NOT leave this field empty. If no specific directives are obvious, generate 3-4 default helpful operational rules (e.g. regarding waiting for app load, scrolling on overflow, or verifying actions).\n\n\
      You MUST respond ONLY with the raw JSON object (enclosed in { and }). No markdown block wrappers, no introduction, no explanation.";
