@@ -35,7 +35,6 @@ mod tests {
     fn test_get_version() {
         let version = get_version();
         assert!(!version.is_empty());
-        assert!(version.len() > 0);
     }
 
     #[test]

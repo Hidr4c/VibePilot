@@ -1,0 +1,39 @@
+# VibePilot — Example Profile
+# Copier ce fichier vers profiles/<nom>.toml puis charger via l'UI
+# ou l'utiliser comme référence pour créer un profil personnalisé.
+
+[config]
+contexte = "Vous opérez sur un poste de développement VS Code avec l'extension Kilo Code. L'objectif est de maintenir un sprint actif et de compléter les tâches restantes."
+objectif = "Augmenter la couverture de tests jusqu'à 80%."
+task = "Vous êtes l'opérateur PC. Votre objectif est d'utiliser l'extension Kilo dans VS Code pour atteindre 80% de couverture de tests."
+directives = "- Si vous détectez 'Considering next step...', 'Running...', ou des logs de test actifs : l'application est OCCUPEE. Retournez 'WAIT'.\n- Si le chat est inactif mais le bas coupé, exécutez un 'SCROLL' vers le bas (scroll_value: -6).\n- Si l'application est complètement arrêtée et a fourni la prochaine description, extrayez-la et retournez 'CLICK_AND_TYPE'."
+demande_generique = "Avoir une couverture de test à 80% avec l'extension Kilo dans VS Code."
+langue = "Français"
+
+[engine]
+moteur = "LM Studio"
+url_api = "http://127.0.0.1:1234/v1/chat/completions"
+nom_modele = "qwen/qwen3.6-35b-a3b"
+
+[vision]
+activer_vision = false
+moteur_vision = "LM Studio"
+url_vision = "http://127.0.0.1:1234/v1/chat/completions"
+modele_vision = "qwen2.5-vl-7b-instruct"
+
+[behavior]
+auto_validate = true
+auto_validate_dangerous = false
+activer_reflexion = false
+activer_systeme_fast_slow = false
+activer_compression_historique = false
+decomposer_taches = false
+max_tentatives_par_tache = 5
+detecter_activite_utilisateur = false
+verifier_placement_souris = false
+activer_son = true
+activer_tooltips = true
+
+[output]
+theme_sombre = true
+fenetres_surveillees = ["Visual Studio Code"]

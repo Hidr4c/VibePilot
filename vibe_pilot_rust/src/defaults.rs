@@ -59,3 +59,26 @@ impl DefaultProfileFactory {
         }
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_build_default_config() {
+        let cfg = DefaultProfileFactory::build_default_config();
+        assert_eq!(cfg.contexte, SavedConfig::default().contexte);
+    }
+
+    #[test]
+    fn test_build_kilo_vscode_profile() {
+        let cfg = DefaultProfileFactory::build_kilo_vscode_profile();
+        assert!(cfg.contexte.contains("Kilo Code"));
+    }
+
+    #[test]
+    fn test_build_gravity_pipeline_profile() {
+        let cfg = DefaultProfileFactory::build_gravity_pipeline_profile();
+        assert!(cfg.contexte.contains("Gravity Pipeline"));
+    }
+}

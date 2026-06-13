@@ -1,5 +1,5 @@
 use crate::app::VibePilotApp;
-use crate::event_bus::EventType;
+use crate::event_bus::NotificationEvent;
 use crate::ui::components::play_system_beep;
 use eframe::egui;
 
@@ -35,11 +35,11 @@ pub fn render_setup_tab(ui: &mut egui::Ui, app: &mut VibePilotApp) {
                     match app.migrate_storage(path_str) {
                         Ok(_) => {
                             app.storage_status_message = "Storage migrated successfully!".to_string();
-                            app.bus.emit(EventType::Log("Storage path migrated successfully.".to_string()));
+                            app.bus.emit_notification(NotificationEvent::Log("Storage path migrated successfully.".to_string()));
                         }
                         Err(e) => {
                             app.storage_status_message = format!("Error migrating storage: {}", e);
-                            app.bus.emit(EventType::Log(format!("Error: failed to migrate storage: {}", e)));
+                            app.bus.emit_notification(NotificationEvent::Log(format!("Error: failed to migrate storage: {}", e)));
                         }
                     }
                 }
@@ -73,6 +73,10 @@ pub fn render_setup_tab(ui: &mut egui::Ui, app: &mut VibePilotApp) {
         let langue = app.current_config.langue.clone();
         let verify_cursor = app.current_config.verifier_placement_souris;
         let detect_activity = app.current_config.detecter_activite_utilisateur;
+        let ssd_savings = app.current_config.economie_ecriture_ssd;
+        let keep_screen_awake = app.current_config.garder_ecran_actif;
+        let capture_folder = app.current_config.dossier_sauvegarde_captures.clone().unwrap_or_default();
+        let chiffrement_dpapi = app.current_config.chiffrement_dpapi;
 
         let mut c_son = son;
         let mut c_tooltips = tooltips;
@@ -82,6 +86,10 @@ pub fn render_setup_tab(ui: &mut egui::Ui, app: &mut VibePilotApp) {
         let mut c_langue = langue.clone();
         let mut c_verify_cursor = verify_cursor;
         let mut c_detect_activity = detect_activity;
+        let mut c_ssd_savings = ssd_savings;
+        let mut c_keep_screen_active = keep_screen_awake;
+        let mut c_capture_folder = capture_folder;
+        let mut c_chiffrement_dpapi = chiffrement_dpapi;
 
         ui.vertical(|ui| {
             if ui.checkbox(&mut c_son, "Sound Notification").changed() {
@@ -98,6 +106,45 @@ pub fn render_setup_tab(ui: &mut egui::Ui, app: &mut VibePilotApp) {
             ui.add_space(4.0);
             ui.checkbox(&mut c_detect_activity, app.t("chk_detect_activity"));
             ui.add_space(4.0);
+            ui.checkbox(&mut c_ssd_savings, app.t("chk_ssd_savings"));
+            ui.add_space(4.0);
+
+            if !c_ssd_savings {
+                ui.indent("ssd_savings_indent", |ui| {
+                    ui.horizontal(|ui| {
+                        ui.label(app.t("lbl_capture_save_folder")).on_hover_text(app.t("tip_capture_save_folder"));
+                        ui.add(
+                            egui::TextEdit::singleline(&mut c_capture_folder)
+                                .desired_width(180.0)
+                        ).on_hover_text(app.t("tip_capture_save_folder"));
+                        
+                        if ui.button(app.t("btn_choose_folder")).clicked() {
+                            if let Some(path) = rfd::FileDialog::new().pick_folder() {
+                                c_capture_folder = path.to_string_lossy().into_owned();
+                            }
+                        }
+                    });
+                });
+                ui.add_space(4.0);
+            }
+            ui.checkbox(&mut c_keep_screen_active, app.t("chk_keep_screen_awake"));
+            ui.add_space(4.0);
+            
+            #[cfg(target_os = "windows")]
+            {
+                ui.checkbox(&mut c_chiffrement_dpapi, "🔒 Windows hardware encryption (DPAPI)")
+                    .on_hover_text("Encrypts credentials using your Windows User Account (DPAPI).");
+            }
+            #[cfg(not(target_os = "windows"))]
+            {
+                let mut fake = false;
+                ui.add_enabled_ui(false, |ui| {
+                    ui.checkbox(&mut fake, "🔒 Windows hardware encryption (DPAPI) (Windows only)")
+                        .on_hover_text("DPAPI is only supported on Windows targets.");
+                });
+            }
+            ui.add_space(4.0);
+
             ui.checkbox(&mut c_theme, "Dark Theme");
 
             ui.add_space(10.0);
@@ -177,13 +224,22 @@ pub fn render_setup_tab(ui: &mut egui::Ui, app: &mut VibePilotApp) {
                 app.current_config.auto_validate_dangerous = c_auto_val_dang;
                 app.current_config.verifier_placement_souris = c_verify_cursor;
                 app.current_config.detecter_activite_utilisateur = c_detect_activity;
+                app.current_config.economie_ecriture_ssd = c_ssd_savings;
+                app.current_config.dossier_sauvegarde_captures = if c_capture_folder.trim().is_empty() {
+                    None
+                } else {
+                    Some(c_capture_folder.clone())
+                };
+                app.current_config.garder_ecran_actif = c_keep_screen_active;
                 app.current_config.theme_sombre = c_theme;
                 app.current_config.langue = c_langue.clone();
+                app.current_config.chiffrement_dpapi = c_chiffrement_dpapi;
 
                 app.config_repo.save_config(&app.current_config);
                 app.last_saved_config = app.current_config.clone();
                 let log_msg = if app.current_config.langue == "Français" { "💾 Configuration globale sauvegardée !" } else { "💾 Global configuration saved!" };
-                app.bus.emit(crate::event_bus::EventType::Log(log_msg.to_string()));
+                app.bus.emit_notification(crate::event_bus::NotificationEvent::Log(log_msg.to_string()));
+                app.show_save_success_popup = Some("global_config".to_string());
             }
         });
 
@@ -193,186 +249,17 @@ pub fn render_setup_tab(ui: &mut egui::Ui, app: &mut VibePilotApp) {
         app.current_config.auto_validate_dangerous = c_auto_val_dang;
         app.current_config.verifier_placement_souris = c_verify_cursor;
         app.current_config.detecter_activite_utilisateur = c_detect_activity;
+        app.current_config.economie_ecriture_ssd = c_ssd_savings;
+        app.current_config.garder_ecran_actif = c_keep_screen_active;
         app.current_config.theme_sombre = c_theme;
         app.current_config.langue = c_langue;
+        app.current_config.chiffrement_dpapi = c_chiffrement_dpapi;
     });
 
     ui.add_space(12.0);
 
     // --- Import / Export ---
-    ui.group(|ui| {
-        ui.label(egui::RichText::new("Import / Export").strong());
-        ui.separator();
-
-        ui.horizontal(|ui| {
-            ui.label(if app.current_config.langue == "Français" { "Profil à exporter :" } else { "Profile to export:" });
-            let profiles = app.config_repo.list_profiles();
-            if app.selected_profile_to_export.is_empty() && !profiles.is_empty() {
-                app.selected_profile_to_export = profiles[0].clone();
-            }
-            egui::ComboBox::from_id_salt("profile_export_combo")
-                .selected_text(&app.selected_profile_to_export)
-                .show_ui(ui, |ui| {
-                    for p in &profiles {
-                        ui.selectable_value(&mut app.selected_profile_to_export, p.clone(), p);
-                    }
-                });
-
-            let btn_export_label = if app.current_config.langue == "Français" { "📤 Exporter le profil" } else { "📤 Export Profile" };
-            if ui.button(btn_export_label).clicked() {
-                if !app.selected_profile_to_export.is_empty() {
-                    let default_filename = format!("{}.json", app.selected_profile_to_export);
-                    if let Some(path) = rfd::FileDialog::new()
-                        .set_file_name(&default_filename)
-                        .add_filter("JSON", &["json"])
-                        .save_file()
-                    {
-                        match app.config_repo.export_single_profile(&app.selected_profile_to_export, &path) {
-                            Ok(()) => {
-                                app.storage_status_message = if app.current_config.langue == "Français" { "Profil exporté avec succès !" } else { "Profile exported successfully!" }.to_string();
-                                app.bus.emit(EventType::Log(format!("Profile '{}' exported.", app.selected_profile_to_export)));
-                            }
-                            Err(e) => {
-                                app.storage_status_message = format!("Export error: {}", e);
-                                app.bus.emit(EventType::Log(format!("Export error: {}", e)));
-                            }
-                        }
-                    }
-                }
-            }
-
-            let btn_import_label = if app.current_config.langue == "Français" { "📥 Importer un profil" } else { "📥 Import Profile" };
-            if ui.button(btn_import_label).clicked() {
-                if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("JSON", &["json"])
-                    .pick_file()
-                {
-                    match app.config_repo.import_single_profile(&path) {
-                        Ok(imported_name) => {
-                            app.storage_status_message = if app.current_config.langue == "Français" {
-                                format!("Profil '{}' importé !", imported_name)
-                            } else {
-                                format!("Profile '{}' imported!", imported_name)
-                            };
-                            app.bus.emit(EventType::Log(format!("Profile '{}' imported.", imported_name)));
-                            app.selected_profile = imported_name;
-                        }
-                        Err(e) => {
-                            app.storage_status_message = format!("Import error: {}", e);
-                            app.bus.emit(EventType::Log(format!("Import error: {}", e)));
-                        }
-                    }
-                }
-            }
-        });
-        ui.add_space(4.0);
-        
-        ui.horizontal(|ui| {
-            ui.label(if app.current_config.langue == "Français" { "Moteur à exporter :" } else { "Engine to export:" });
-            let engines = app.engine_presets.all_keys();
-            if app.selected_engine_to_export.is_empty() && !engines.is_empty() {
-                app.selected_engine_to_export = engines[0].clone();
-            }
-            egui::ComboBox::from_id_salt("engine_export_combo")
-                .selected_text(&app.selected_engine_to_export)
-                .show_ui(ui, |ui| {
-                    for e in &engines {
-                        ui.selectable_value(&mut app.selected_engine_to_export, e.clone(), e);
-                    }
-                });
-
-            let btn_export_label = if app.current_config.langue == "Français" { "📤 Exporter le moteur" } else { "📤 Export Engine" };
-            if ui.button(btn_export_label).clicked() {
-                if !app.selected_engine_to_export.is_empty() {
-                    let default_filename = format!("{}.json", app.selected_engine_to_export);
-                    if let Some(path) = rfd::FileDialog::new()
-                        .set_file_name(&default_filename)
-                        .add_filter("JSON", &["json"])
-                        .save_file()
-                    {
-                        match app.config_repo.export_single_engine(&app.selected_engine_to_export, &path) {
-                            Ok(()) => {
-                                app.storage_status_message = if app.current_config.langue == "Français" { "Moteur exporté avec succès !" } else { "Engine exported successfully!" }.to_string();
-                                app.bus.emit(EventType::Log(format!("Engine '{}' exported.", app.selected_engine_to_export)));
-                            }
-                            Err(e) => {
-                                app.storage_status_message = format!("Export error: {}", e);
-                                app.bus.emit(EventType::Log(format!("Export error: {}", e)));
-                            }
-                        }
-                    }
-                }
-            }
-
-            let btn_import_label = if app.current_config.langue == "Français" { "📥 Importer un moteur" } else { "📥 Import Engine" };
-            if ui.button(btn_import_label).clicked() {
-                if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("JSON", &["json"])
-                    .pick_file()
-                {
-                    match app.config_repo.import_single_engine(&path) {
-                        Ok(imported_name) => {
-                            app.storage_status_message = if app.current_config.langue == "Français" {
-                                format!("Moteur '{}' importé !", imported_name)
-                            } else {
-                                format!("Engine '{}' imported!", imported_name)
-                            };
-                            app.bus.emit(EventType::Log(format!("Engine '{}' imported.", imported_name)));
-                            app.engine_presets = app.config_repo.load_engines();
-                            app.selected_engine_to_export = imported_name;
-                        }
-                        Err(e) => {
-                            app.storage_status_message = format!("Import error: {}", e);
-                            app.bus.emit(EventType::Log(format!("Import error: {}", e)));
-                        }
-                    }
-                }
-            }
-        });
-
-        ui.add_space(4.0);
-
-        ui.horizontal(|ui| {
-            let btn_export_cfg_label = if app.current_config.langue == "Français" { "📤 Exporter le Setup" } else { "📤 Export Setup" };
-            if ui.button(btn_export_cfg_label).clicked() {
-                if let Some(path) = rfd::FileDialog::new()
-                    .set_file_name("vibepilot-setup.json")
-                    .add_filter("JSON", &["json"])
-                    .save_file()
-                {
-                    match app.config_repo.export_config(&path) {
-                        Ok(()) => {
-                            app.storage_status_message = if app.current_config.langue == "Français" { "Setup exporté avec succès !" } else { "Setup exported successfully!" }.to_string();
-                            app.bus.emit(EventType::Log("Setup exported.".to_string()));
-                        }
-                        Err(e) => {
-                            app.storage_status_message = format!("Export error: {}", e);
-                            app.bus.emit(EventType::Log(format!("Export error: {}", e)));
-                        }
-                    }
-                }
-            }
-
-            let btn_import_cfg_label = if app.current_config.langue == "Français" { "📥 Importer un Setup" } else { "📥 Import Setup" };
-            if ui.button(btn_import_cfg_label).clicked() {
-                if let Some(path) = rfd::FileDialog::new()
-                    .add_filter("JSON", &["json"])
-                    .pick_file()
-                {
-                    match app.config_repo.import_config(&path) {
-                        Ok(()) => {
-                            app.storage_status_message = if app.current_config.langue == "Français" { "Setup importé avec succès ! (Un redémarrage peut être nécessaire)" } else { "Setup imported successfully! (Restart may be required)" }.to_string();
-                            app.bus.emit(EventType::Log("Setup imported.".to_string()));
-                        }
-                        Err(e) => {
-                            app.storage_status_message = format!("Import error: {}", e);
-                            app.bus.emit(EventType::Log(format!("Import error: {}", e)));
-                        }
-                    }
-                }
-            }
-        });
-    });
+    crate::ui::setup_import_export::render_import_export_group(ui, app);
 
     ui.add_space(12.0);
 
@@ -405,7 +292,7 @@ pub fn render_setup_tab(ui: &mut egui::Ui, app: &mut VibePilotApp) {
         ui.horizontal(|ui| {
             if ui.button("Clear Resume Prompt").clicked() {
                 app.current_config.prompt_reprise = None;
-                app.bus.emit(EventType::Log("Resumption prompt cleared.".to_string()));
+                app.bus.emit_notification(NotificationEvent::Log("Resumption prompt cleared.".to_string()));
             }
 
             ui.add_space(16.0);
@@ -416,3 +303,5 @@ pub fn render_setup_tab(ui: &mut egui::Ui, app: &mut VibePilotApp) {
         });
     });
 }
+
+

@@ -1,5 +1,5 @@
 use crate::app::VibePilotApp;
-use crate::event_bus::EventType;
+use crate::event_bus::NotificationEvent;
 use eframe::egui;
 
 fn is_profile_modified(app: &VibePilotApp) -> bool {
@@ -12,7 +12,8 @@ fn is_profile_modified(app: &VibePilotApp) -> bool {
 fn render_editor_profile_manager(ui: &mut egui::Ui, app: &mut VibePilotApp) {
     ui.horizontal(|ui| {
         ui.label(app.t("lbl_profil")).on_hover_text(app.t("tip_frame_profils"));
-        let profiles = app.config_repo.list_profiles();
+        let mut profiles = app.config_repo.list_profiles();
+        profiles.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
         
         // Combobox for choosing existing profiles (auto-loads on selection)
         let mut selected = app.selected_profile.clone();
@@ -24,10 +25,8 @@ fn render_editor_profile_manager(ui: &mut egui::Ui, app: &mut VibePilotApp) {
                     ui.selectable_value(&mut selected, p.clone(), p);
                 }
             });
-        if selected != app.selected_profile {
-            if !selected.is_empty() {
-                app.load_profile(&selected);
-            }
+        if selected != app.selected_profile && !selected.is_empty() {
+            app.load_profile(&selected);
         }
 
         // Textbox to edit/type the name directly
@@ -36,41 +35,42 @@ fn render_editor_profile_manager(ui: &mut egui::Ui, app: &mut VibePilotApp) {
 
         // Save Button (saves current prompts to the selected profile)
         let btn_save_label = if app.current_config.langue == "Français" { "💾 Sauver" } else { "💾 Save" };
-        if ui.button(btn_save_label).on_hover_text(app.t("tip_save_profile")).clicked() {
-            if !app.selected_profile.is_empty() {
-                app.current_config.dernier_profil = app.selected_profile.clone();
-                if app.config_repo.save_profile(&app.selected_profile, &app.current_config) {
-                    app.last_saved_config = app.current_config.clone();
-                    app.bus.emit(EventType::Log(format!("Profile '{}' saved", app.selected_profile)));
-                }
+        if ui.button(btn_save_label).on_hover_text(app.t("tip_save_profile")).clicked()
+            && !app.selected_profile.is_empty()
+        {
+            app.current_config.dernier_profil = app.selected_profile.clone();
+            if app.config_repo.save_profile(&app.selected_profile, &app.current_config) {
+                app.last_saved_config = app.current_config.clone();
+                app.bus.emit_notification(NotificationEvent::Log(format!("Profile '{}' saved", app.selected_profile)));
+                app.show_save_success_popup = Some(app.selected_profile.clone());
             }
         }
 
         // Delete Button
-        if ui.button(app.t("btn_supprimer")).on_hover_text(app.t("tip_del_profile")).clicked() {
-            if !app.selected_profile.is_empty() {
-                app.show_delete_confirm = Some(app.selected_profile.clone());
-            }
+        if ui.button(app.t("btn_supprimer")).on_hover_text(app.t("tip_del_profile")).clicked()
+            && !app.selected_profile.is_empty()
+        {
+            app.show_delete_confirm = Some(app.selected_profile.clone());
         }
 
         // Rename Button
         let btn_rename_label = if app.current_config.langue == "Français" { "✏️ Renommer" } else { "✏️ Rename" };
         let tip_rename_profile = if app.current_config.langue == "Français" { "Renommer le profil sélectionné" } else { "Rename the selected profile" };
-        if ui.button(btn_rename_label).on_hover_text(tip_rename_profile).clicked() {
-            if !app.selected_profile.is_empty() {
-                app.show_rename_profile = Some(app.selected_profile.clone());
-                app.rename_profile_new_name = app.selected_profile.clone();
-            }
+        if ui.button(btn_rename_label).on_hover_text(tip_rename_profile).clicked()
+            && !app.selected_profile.is_empty()
+        {
+            app.show_rename_profile = Some(app.selected_profile.clone());
+            app.rename_profile_new_name = app.selected_profile.clone();
         }
 
         // Refresh/Reload Button
         let btn_refresh_label = if app.current_config.langue == "Français" { "🔄 Recharger" } else { "🔄 Reload" };
         let tip_refresh_profile = if app.current_config.langue == "Français" { "Annuler les modifications et recharger le profil depuis le disque" } else { "Discard changes and reload the profile from disk" };
-        if ui.button(btn_refresh_label).on_hover_text(tip_refresh_profile).clicked() {
-            if !app.selected_profile.is_empty() {
-                let current_profile = app.selected_profile.clone();
-                app.load_profile(&current_profile);
-            }
+        if ui.button(btn_refresh_label).on_hover_text(tip_refresh_profile).clicked()
+            && !app.selected_profile.is_empty()
+        {
+            let current_profile = app.selected_profile.clone();
+            app.load_profile(&current_profile);
         }
 
         // Modified Indicator
@@ -189,7 +189,8 @@ pub fn render_prompt_editor_tab(ui: &mut egui::Ui, app: &mut VibePilotApp) {
     ui.horizontal(|ui| {
         if ui.add(egui::Button::new(egui::RichText::new(app.t("btn_sauver")).color(egui::Color32::WHITE).strong()).fill(egui::Color32::from_rgb(20, 120, 100))).on_hover_text(app.t("tip_save_profile")).clicked() {
             app.config_repo.save_config(&app.current_config);
-            app.bus.emit(EventType::Log("Configuration saved".to_string()));
+            app.bus.emit_notification(NotificationEvent::Log("Configuration saved".to_string()));
+            app.show_save_success_popup = Some("config".to_string());
         }
     });
 }

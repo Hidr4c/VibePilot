@@ -1,5 +1,5 @@
 use crate::app::VibePilotApp;
-use crate::event_bus::EventType;
+use crate::event_bus::NotificationEvent;
 use eframe::egui;
 
 // ============================================================
@@ -9,246 +9,133 @@ pub fn render_config_tab(ui: &mut egui::Ui, app: &mut VibePilotApp) {
     let available_width = ui.available_width();
 
     // --- Section 1: AI Engine & Model ---
+    crate::ui::engine_config::render_engine_config_section(ui, app);
+
+    ui.add_space(12.0);
+
+
+    // --- Section 1.5: Advanced Intelligence & Guidance ---
     ui.group(|ui| {
-        ui.label(app.t("frame_ia")).on_hover_text(app.t("tip_frame_ia"));
-        ui.separator();
-
-        ui.horizontal_wrapped(|ui| {
-            ui.label(app.t("lbl_moteur")).on_hover_text(app.t("tip_frame_ia"));
-            let engines = app.engine_presets.all_keys();
-            let current = app.current_config.moteur.clone();
-            let mut engine_sel = current.clone();
-            egui::ComboBox::from_id_salt("engine_combo")
-                .width(120.0)
-                .selected_text(&current)
-                .show_ui(ui, |ui| {
-                    for engine in &engines {
-                        ui.selectable_value(&mut engine_sel, engine.clone(), engine);
-                    }
-                });
-            if engine_sel != current {
-                app.current_config.moteur = engine_sel.clone();
-                if let Some(preset) = app.engine_presets.get(&engine_sel) {
-                    app.current_config.url_api = preset.url.clone();
-                }
-            }
-
-            if ui.button("+").on_hover_text(app.t("tip_add_engine")).clicked() {
-                app.show_add_engine = true;
-            }
-
-            if ui.button("🗑").on_hover_text(app.t("tip_del_engine")).clicked() {
-                let current_engine = app.current_config.moteur.clone();
-                if current_engine != "LM Studio" && current_engine != "Ollama" && current_engine != "Perso / Autre" {
-                    app.engine_presets.remove(&current_engine);
-                    app.config_repo.save_engines(&app.engine_presets);
-                    app.current_config.moteur = "LM Studio".to_string();
-                    app.bus.emit(EventType::Log(format!("Engine preset '{}' deleted", current_engine)));
-                }
-            }
-
-            ui.add_space(8.0);
-            ui.label(app.t("lbl_url")).on_hover_text(app.t("tip_frame_ia"));
-            ui.add(egui::TextEdit::singleline(&mut app.current_config.url_api).desired_width(180.0));
-
-            ui.add_space(8.0);
-            ui.label(app.t("lbl_modele")).on_hover_text(app.t("tip_frame_ia"));
-            let mut model = app.current_config.nom_modele.clone();
-            let mut model_sel = model.clone();
-            ui.add(egui::TextEdit::singleline(&mut model).desired_width(180.0));
-            egui::ComboBox::from_id_salt("model_combo_suggestions")
-                .width(16.0)
-                .selected_text("")
-                .show_ui(ui, |ui| {
-                    if let Some(preset) = app.engine_presets.get(&app.current_config.moteur) {
-                        for m in &preset.modeles {
-                            ui.selectable_value(&mut model_sel, m.clone(), m);
-                        }
-                    }
-                });
-            if model_sel != model && model_sel != app.current_config.nom_modele {
-                model = model_sel;
-            }
-            app.current_config.nom_modele = model;
-
-            ui.add_space(4.0);
-            let scan_lbl = if app.current_config.langue == "Français" { "🔄 Scan" } else { "🔄 Scan" };
-            let scan_tip = if app.current_config.langue == "Français" { "Scanner les modèles disponibles sur ce moteur" } else { "Scan available models on this engine" };
-            if ui.button(scan_lbl).on_hover_text(scan_tip).clicked() {
-                app.scan_models();
-            }
-        });
-
-        ui.add_space(6.0);
         ui.horizontal(|ui| {
-            ui.label(app.t("lbl_auth_mode"));
-            let mut auth_sel = app.current_config.auth_mode.clone();
-            egui::ComboBox::from_id_salt("auth_mode_combo")
-                .width(100.0)
-                .selected_text(match auth_sel.as_str() {
-                    "api_key" => app.t("lbl_auth_api_key"),
-                    "basic_auth" => app.t("lbl_auth_basic"),
-                    _ => app.t("lbl_auth_none"),
-                })
-                .show_ui(ui, |ui| {
-                    ui.selectable_value(&mut auth_sel, "none".to_string(), app.t("lbl_auth_none"));
-                    ui.selectable_value(&mut auth_sel, "api_key".to_string(), app.t("lbl_auth_api_key"));
-                    ui.selectable_value(&mut auth_sel, "basic_auth".to_string(), app.t("lbl_auth_basic"));
-                });
-            if auth_sel != app.current_config.auth_mode {
-                app.current_config.auth_mode = auth_sel;
-            }
-
-            if app.current_config.auth_mode == "api_key" {
-                ui.add_space(8.0);
-                ui.label(app.t("lbl_api_key"));
-                ui.add(egui::TextEdit::singleline(&mut app.current_config.auth_api_key).password(true).desired_width(120.0));
-            } else if app.current_config.auth_mode == "basic_auth" {
-                ui.add_space(8.0);
-                ui.label(app.t("lbl_auth_login"));
-                ui.add(egui::TextEdit::singleline(&mut app.current_config.auth_login).desired_width(100.0));
-                ui.add_space(4.0);
-                ui.label(app.t("lbl_auth_password"));
-                ui.add(egui::TextEdit::singleline(&mut app.current_config.auth_password).password(true).desired_width(100.0));
-            }
-
-            ui.add_space(16.0);
-            ui.label(app.t("lbl_request_timeout"));
-            ui.add(egui::Slider::new(&mut app.current_config.request_timeout_secs, 10..=3600).suffix("s"));
+            ui.label(if app.current_config.langue == "Français" { "🧠 Intelligence & Guidage Avancé" } else { "🧠 Advanced Intelligence & Guidance" });
         });
-
-        ui.add_space(6.0);
+        ui.separator();
+        
         ui.horizontal(|ui| {
             ui.checkbox(
-                &mut app.current_config.utiliser_moteur_vision_dedie,
+                &mut app.current_config.decomposer_taches,
                 if app.current_config.langue == "Français" {
-                    "Utiliser un modèle de vision dédié (conseillé pour la rapidité)"
+                    "Décomposer l'objectif en graphe de sous-tâches (TaskGraph)"
                 } else {
-                    "Use a dedicated Vision Model (recommended for speed)"
+                    "Decompose objective into a task graph (TaskGraph)"
+                }
+            );
+            
+            ui.add_space(16.0);
+            
+            ui.checkbox(
+                &mut app.current_config.activer_reflexion,
+                if app.current_config.langue == "Français" {
+                    "Activer la réflexion visuelle post-action (Reflection)"
+                } else {
+                    "Enable post-action visual reflection (Reflection)"
+                }
+            );
+        });
+        
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.checkbox(
+                &mut app.current_config.pipeline_vision_avance,
+                if app.current_config.langue == "Français" {
+                    "Activer le zoom dynamique sur zone d'intérêt (Zoom VLM)"
+                } else {
+                    "Enable dynamic zoom on region of interest (Zoom VLM)"
+                }
+            );
+        });
+        
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.checkbox(
+                &mut app.current_config.activer_systeme_fast_slow,
+                if app.current_config.langue == "Français" {
+                    "Activer le routage d'actions rapides (Fast/Slow)"
+                } else {
+                    "Enable fast/slow action routing (Fast/Slow)"
+                }
+            );
+            
+            ui.add_space(16.0);
+            
+            ui.checkbox(
+                &mut app.current_config.activer_compression_historique,
+                if app.current_config.langue == "Français" {
+                    "Activer la compression d'historique de contexte"
+                } else {
+                    "Enable context history compression"
+                }
+            );
+        });
+        
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.checkbox(
+                &mut app.current_config.economie_ecriture_ssd,
+                if app.current_config.langue == "Français" {
+                    "Économie d'écriture SSD (Vacation de 5 min)"
+                } else {
+                    "SSD Write Protection (5-min vacation cache)"
+                }
+            );
+
+            ui.add_space(16.0);
+
+            ui.checkbox(
+                &mut app.current_config.activer_recadrage_workspace,
+                if app.current_config.langue == "Français" {
+                    "Activer le recadrage adaptatif de la zone de travail"
+                } else {
+                    "Enable adaptive workspace cropping"
+                }
+            );
+        });
+        
+        ui.add_space(4.0);
+        ui.horizontal(|ui| {
+            ui.checkbox(
+                &mut app.current_config.activer_roi,
+                if app.current_config.langue == "Français" {
+                    "Activer la zone d'intérêt (ROI) fixe"
+                } else {
+                    "Enable fixed Region of Interest (ROI)"
                 }
             );
         });
 
-        if app.current_config.utiliser_moteur_vision_dedie {
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                ui.label(if app.current_config.langue == "Français" { "Moteur Vision :" } else { "Vision Engine:" });
-                let engines = app.engine_presets.all_keys();
-                let current_v_engine = app.current_config.moteur_vision.clone();
-                let mut v_engine_sel = current_v_engine.clone();
-                egui::ComboBox::from_id_salt("vision_engine_combo")
-                    .width(120.0)
-                    .selected_text(&current_v_engine)
-                    .show_ui(ui, |ui| {
-                        for engine in &engines {
-                            ui.selectable_value(&mut v_engine_sel, engine.clone(), engine);
-                        }
-                    });
-                if v_engine_sel != current_v_engine {
-                    app.current_config.moteur_vision = v_engine_sel.clone();
-                    if let Some(preset) = app.engine_presets.get(&v_engine_sel) {
-                        app.current_config.url_api_vision = preset.url.clone();
-                    }
-                }
-
-                ui.add_space(8.0);
-                ui.label(if app.current_config.langue == "Français" { "URL Vision :" } else { "Vision URL:" });
-                ui.add(egui::TextEdit::singleline(&mut app.current_config.url_api_vision).desired_width(180.0));
-
-                ui.add_space(8.0);
-                ui.label(if app.current_config.langue == "Français" { "Modèle Vision :" } else { "Vision Model:" });
-                let mut v_model = app.current_config.nom_modele_vision.clone();
-                let mut v_model_sel = v_model.clone();
-                ui.add(egui::TextEdit::singleline(&mut v_model).desired_width(180.0));
-                egui::ComboBox::from_id_salt("vision_model_combo_suggestions")
-                    .width(16.0)
-                    .selected_text("")
-                    .show_ui(ui, |ui| {
-                        if let Some(preset) = app.engine_presets.get(&app.current_config.moteur_vision) {
-                            for m in &preset.modeles {
-                                ui.selectable_value(&mut v_model_sel, m.clone(), m);
-                            }
-                        }
-                    });
-                if v_model_sel != v_model && v_model_sel != app.current_config.nom_modele_vision {
-                    v_model = v_model_sel;
-                }
-                app.current_config.nom_modele_vision = v_model;
-
-                ui.add_space(4.0);
-                let scan_lbl = if app.current_config.langue == "Français" { "🔄 Scan" } else { "🔄 Scan" };
-                let scan_tip = if app.current_config.langue == "Français" { "Scanner les modèles disponibles sur ce moteur de vision" } else { "Scan available models on this vision engine" };
-                if ui.button(scan_lbl).on_hover_text(scan_tip).clicked() {
-                    app.scan_models_vision();
-                }
-            });
-
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                ui.label(if app.current_config.langue == "Français" { "Auth Vision :" } else { "Vision Auth:" });
-                let mut auth_v_sel = app.current_config.auth_mode_vision.clone();
-                egui::ComboBox::from_id_salt("vision_auth_mode_combo")
-                    .width(100.0)
-                    .selected_text(match auth_v_sel.as_str() {
-                        "api_key" => app.t("lbl_auth_api_key"),
-                        "basic_auth" => app.t("lbl_auth_basic"),
-                        _ => app.t("lbl_auth_none"),
-                    })
-                    .show_ui(ui, |ui| {
-                        ui.selectable_value(&mut auth_v_sel, "none".to_string(), app.t("lbl_auth_none"));
-                        ui.selectable_value(&mut auth_v_sel, "api_key".to_string(), app.t("lbl_auth_api_key"));
-                        ui.selectable_value(&mut auth_v_sel, "basic_auth".to_string(), app.t("lbl_auth_basic"));
-                    });
-                if auth_v_sel != app.current_config.auth_mode_vision {
-                    app.current_config.auth_mode_vision = auth_v_sel;
-                }
-
-                if app.current_config.auth_mode_vision == "api_key" {
+        if app.current_config.activer_roi {
+            ui.indent("roi_settings_indent", |ui| {
+                ui.horizontal(|ui| {
+                    ui.label("X:");
+                    ui.add(egui::DragValue::new(&mut app.current_config.roi_x).range(0..=9999));
                     ui.add_space(8.0);
-                    ui.label(app.t("lbl_api_key"));
-                    ui.add(egui::TextEdit::singleline(&mut app.current_config.auth_api_key_vision).password(true).desired_width(120.0));
-                } else if app.current_config.auth_mode_vision == "basic_auth" {
+                    ui.label("Y:");
+                    ui.add(egui::DragValue::new(&mut app.current_config.roi_y).range(0..=9999));
                     ui.add_space(8.0);
-                    ui.label(app.t("lbl_auth_login"));
-                    ui.add(egui::TextEdit::singleline(&mut app.current_config.auth_login_vision).desired_width(100.0));
-                    ui.add_space(4.0);
-                    ui.label(app.t("lbl_auth_password"));
-                    ui.add(egui::TextEdit::singleline(&mut app.current_config.auth_password_vision).password(true).desired_width(100.0));
-                }
-
-                ui.add_space(16.0);
-                ui.label(if app.current_config.langue == "Français" { "Timeout Vision :" } else { "Vision Timeout:" });
-                ui.add(egui::Slider::new(&mut app.current_config.request_timeout_secs_vision, 10..=3600).suffix("s"));
+                    ui.label("W:");
+                    ui.add(egui::DragValue::new(&mut app.current_config.roi_width).range(1..=9999));
+                    ui.add_space(8.0);
+                    ui.label("H:");
+                    ui.add(egui::DragValue::new(&mut app.current_config.roi_height).range(1..=9999));
+                });
             });
         }
-
-        if app.show_add_engine {
-            ui.add_space(6.0);
-            ui.group(|ui| {
-                ui.horizontal(|ui| {
-                    ui.label("Name:");
-                    ui.text_edit_singleline(&mut app.new_engine_name);
-                    ui.label("URL:");
-                    ui.text_edit_singleline(&mut app.new_engine_url);
-                    if ui.button("Save Preset").clicked() {
-                        if !app.new_engine_name.is_empty() && !app.new_engine_url.is_empty() {
-                            let new_profile = crate::config::EngineProfile {
-                                url: app.new_engine_url.clone(),
-                                modeles: vec!["gpt-4o".to_string(), "qwen2.5-vl-7b-instruct".to_string(), "meta-llama-3-8b-instruct".to_string()],
-                            };
-                            app.engine_presets.insert(app.new_engine_name.clone(), new_profile);
-                            app.config_repo.save_engines(&app.engine_presets);
-                            app.current_config.moteur = app.new_engine_name.clone();
-                            app.current_config.url_api = app.new_engine_url.clone();
-                            app.show_add_engine = false;
-                            app.new_engine_name = String::new();
-                            app.new_engine_url = String::new();
-                        }
-                    }
-                    if ui.button("Cancel").clicked() {
-                        app.show_add_engine = false;
-                    }
-                });
+        
+        if app.current_config.decomposer_taches {
+            ui.add_space(4.0);
+            ui.horizontal(|ui| {
+                ui.label(if app.current_config.langue == "Français" { "Tentatives max par tâche :" } else { "Max attempts per sub-task:" });
+                ui.add(egui::Slider::new(&mut app.current_config.max_tentatives_par_tache, 1..=10));
             });
         }
     });
@@ -263,7 +150,8 @@ pub fn render_config_tab(ui: &mut egui::Ui, app: &mut VibePilotApp) {
         ui.separator();
 
         ui.horizontal(|ui| {
-            let all_windows = app.orchestrator.get_available_windows();
+            let mut all_windows = app.orchestrator.get_available_windows();
+            all_windows.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
             let current = &app.current_config.fenetres_surveillees;
             let mut selected_win: Option<String> = None;
             
@@ -285,7 +173,7 @@ pub fn render_config_tab(ui: &mut egui::Ui, app: &mut VibePilotApp) {
             let refresh_label = if app.current_config.langue == "Français" { "🔄 Rafraîchir" } else { "🔄 Refresh List" };
             if ui.button(refresh_label).on_hover_text(app.t("tip_refresh")).clicked() {
                 app.orchestrator.refresh_windows();
-                app.bus.emit(EventType::Log("Refreshing window list...".to_string()));
+                app.bus.emit_notification(NotificationEvent::Log("Refreshing window list...".to_string()));
             }
 
             if let Some(win) = selected_win {
@@ -298,8 +186,9 @@ pub fn render_config_tab(ui: &mut egui::Ui, app: &mut VibePilotApp) {
                     });
                 }
                 windows.push(win.clone());
+                windows.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
                 app.current_config.fenetres_surveillees = windows;
-                app.bus.emit(EventType::Log(format!("Window added: {}", win)));
+                app.bus.emit_notification(NotificationEvent::Log(format!("Window added: {}", win)));
             }
         });
 
@@ -313,6 +202,7 @@ pub fn render_config_tab(ui: &mut egui::Ui, app: &mut VibePilotApp) {
             });
         } else {
             let mut windows_clone = windows.clone();
+            windows_clone.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
             let mut to_remove: Option<usize> = None;
             for (i, title) in windows_clone.iter().enumerate() {
                 ui.horizontal(|ui| {
@@ -346,21 +236,101 @@ pub fn render_config_tab(ui: &mut egui::Ui, app: &mut VibePilotApp) {
         
         ui.horizontal(|ui| {
             ui.label(app.t("lbl_profil")).on_hover_text(app.t("tip_frame_profils"));
-            let profiles = app.config_repo.list_profiles();
+            let mut profiles = app.config_repo.list_profiles();
+            profiles.sort_by(|a, b| a.to_lowercase().cmp(&b.to_lowercase()));
             
-            let mut selected = app.selected_profile.clone();
-            let combobox_hint = if app.current_config.langue == "Français" { "Sélectionner un profil..." } else { "Select a profile..." };
-            egui::ComboBox::from_id_salt("profile_mgr_config_select_only")
-                .selected_text(if selected.is_empty() { combobox_hint } else { &selected })
+            let mut current_profile_name = app.selected_profile.clone();
+            let mut selected_val = current_profile_name.clone();
+            
+            // Text box for typing/creating a new profile name or displaying the loaded one
+            let response = ui.add(egui::TextEdit::singleline(&mut current_profile_name).desired_width(180.0));
+            
+            // Dropdown combobox next to it to select from existing profiles
+            egui::ComboBox::from_id_salt("profile_combo_suggestions")
+                .width(16.0)
+                .selected_text("")
                 .show_ui(ui, |ui| {
                     for p in &profiles {
-                        ui.selectable_value(&mut selected, p.clone(), p);
+                        ui.selectable_value(&mut selected_val, p.clone(), p);
                     }
                 });
-            if selected != app.selected_profile {
-                if !selected.is_empty() {
-                    app.load_profile(&selected);
+            
+            // Save Button (saves current configuration to the selected profile)
+            let btn_save_label = if app.current_config.langue == "Français" { "💾 Sauver" } else { "💾 Save" };
+            if ui.button(btn_save_label).on_hover_text(app.t("tip_save_profile")).clicked()
+                && !app.selected_profile.is_empty()
+            {
+                app.current_config.dernier_profil = app.selected_profile.clone();
+                if app.config_repo.save_profile(&app.selected_profile, &app.current_config) {
+                    app.last_saved_config = app.current_config.clone();
+                    app.bus.emit_notification(NotificationEvent::Log(format!("Profile '{}' saved", app.selected_profile)));
+                    app.show_save_success_popup = Some(app.selected_profile.clone());
                 }
+            }
+            
+            if selected_val != app.selected_profile && !selected_val.is_empty() {
+                // User selected an existing profile from the dropdown
+                app.load_profile(&selected_val);
+            } else if response.changed() {
+                // User typed something
+                let trimmed = current_profile_name.trim().to_string();
+                if profiles.contains(&trimmed) {
+                    app.load_profile(&trimmed);
+                } else {
+                    app.selected_profile = trimmed.clone();
+                    app.quick_start_profile_name = trimmed;
+                }
+            }
+        });
+    });
+
+    ui.add_space(12.0);
+
+    // --- Section 4: AI Prompt Generator ---
+    ui.group(|ui| {
+        ui.horizontal(|ui| {
+            ui.label(app.t("frame_generateur")).on_hover_text(app.t("tip_generate_all"));
+        });
+        ui.separator();
+
+        let hint_gen_desc = if app.current_config.langue == "Français" {
+            "Saisissez une simple demande et l'IA va générer la configuration complète :"
+        } else {
+            "Enter a simple request and AI will generate the full configuration:"
+        };
+        ui.label(hint_gen_desc);
+        ui.add_space(6.0);
+        let hint_gen_ex = if app.current_config.langue == "Français" {
+            "Exemple: 'Automatiser les tests d'extension VS Code pour atteindre 80% de couverture'"
+        } else {
+            "Example: 'Automate testing VS Code extension to reach 80% coverage'"
+        };
+        
+        let text_height = 80.0;
+        ui.add(egui::TextEdit::multiline(&mut app.current_config.demande_generique)
+            .hint_text(hint_gen_ex)
+            .desired_width(available_width)
+            .min_size(egui::vec2(available_width, text_height)));
+
+        ui.add_space(8.0);
+        ui.horizontal(|ui| {
+            let btn = egui::Button::new(egui::RichText::new(app.t("btn_generer_tout")).color(egui::Color32::WHITE).strong())
+                .fill(egui::Color32::from_rgb(106, 27, 154));
+
+            ui.add_enabled_ui(!app.is_generating_prompts, |ui| {
+                if ui.add(btn).on_hover_text(app.t("tip_generate_all")).clicked() {
+                    app.generate_prompts_from_request();
+                }
+            });
+
+            if app.is_generating_prompts {
+                ui.spinner();
+                let generating_lbl = if app.current_config.langue == "Français" {
+                    "Génération en cours..."
+                } else {
+                    "Generating..."
+                };
+                ui.label(generating_lbl);
             }
         });
     });

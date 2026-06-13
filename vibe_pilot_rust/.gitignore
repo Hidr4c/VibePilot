@@ -1,0 +1,5 @@
+/target/
+*.enc
+*.log
+*.corrupt
+*.bak

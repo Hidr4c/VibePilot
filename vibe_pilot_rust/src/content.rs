@@ -8,6 +8,7 @@ pub fn lexicon_fr() -> std::collections::HashMap<&'static str, &'static str> {
     map.insert("tab_quickstart", " ❖ Aide - Démarrage Rapide ");
     map.insert("tab_prompts", " ✎ Éditeur de Prompts ");
     map.insert("tab_console", " ➤ Console & Supervision ");
+    map.insert("tab_task_graph", " 🪵 Graphe de Tâches ");
     map.insert("frame_generateur", " ✨ Générateur de consigne rapide par l'IA ");
     map.insert("frame_timeline", " 🌐 Timeline Visuelle des Actions (Git Commit-Style) ");
     map.insert("frame_logs", " 🔴 Console d'Activité & Logs Temps Réel ");
@@ -27,6 +28,8 @@ pub fn lexicon_fr() -> std::collections::HashMap<&'static str, &'static str> {
     map.insert("btn_sauver", "💾 Sauvegarder profil");
     map.insert("btn_opti_court", "🪄 Optimiser ce champ");
     map.insert("btn_clear_logs", "🗑️ Effacer les logs");
+    map.insert("btn_copy_logs", "📋 Copier les Logs");
+    map.insert("btn_copy_report", "📋 Copier le Rapport");
     map.insert("btn_generer_tout", "✨ Générer la configuration");
     map.insert("btn_lancer", "🚀 Lancer");
     map.insert("btn_arreter", "⏹️ Arrêter");
@@ -150,7 +153,7 @@ pub fn lexicon_fr() -> std::collections::HashMap<&'static str, &'static str> {
     map.insert("chk_auto_validate_dangerous", "🔒 Auto-validation commandes dangereuses");
     map.insert("tip_auto_validate", "Si activé, les actions de clic et défilement standard de l'IA sont exécutées sans confirmation.");
     map.insert("tip_auto_validate_dangerous", "Si activé, les commandes potentiellement dangereuses (ex: rm, format, sudo) sont validées automatiquement.");
-    map.insert("tip_zoom_facteur", "Définit le niveau de zoom/mise à l'échelle de l'interface. Fixer à 100% ou 125% résout les bugs de redimensionnement infini sous Windows lors du déplacement entre écrans à résolutions différentes (DPI).");
+    map.insert("tip_zoom_facteur", "Définit le niveau de zoom/mise à l'échelle de l'interface utilisateur. Utile si l'application apparaît trop petite ou trop grande sur votre écran.");
     map.insert("security_warning_titre", "⚠️ Actions de l'IA");
     map.insert("security_warning_texte", "L'IA a décidé des actions suivantes :\n\n{actions}\n\nVoulez-vous les exécuter ?");
     map.insert("security_warning_yes", "✅ Exécuter");
@@ -171,7 +174,21 @@ pub fn lexicon_fr() -> std::collections::HashMap<&'static str, &'static str> {
     map.insert("msg_profile_ready", "Les prompts ont été générés et le profil '{}' est prêt.");
     map.insert("chk_verify_cursor", "🔍 Vérifier le placement du curseur avant clic ou écriture");
     map.insert("chk_detect_activity", "⏸ Pause auto si l'utilisateur est actif (souris/clavier)");
+    map.insert("chk_ssd_savings", "💾 Économiser le SSD (ne pas écrire les captures d'écran sur le disque)");
+    map.insert("chk_keep_screen_awake", "🔌 Garder l'écran actif pendant l'orchestration");
+    map.insert("lbl_capture_save_folder", "📁 Dossier de sauvegarde :");
+    map.insert("tip_capture_save_folder", "Sélectionnez le dossier où enregistrer les captures d'écran (lorsque l'économie SSD est désactivée).");
+    map.insert("btn_choose_folder", "📁 Choisir...");
     map.insert("status_user_active", "Utilisateur actif - En attente...");
+    map.insert("lbl_save_success", "Sauvegarde Réussie");
+    map.insert("msg_profile_saved", "Le profil '{}' a été sauvegardé avec succès !");
+    map.insert("msg_config_saved", "La configuration a été sauvegardée avec succès !");
+    map.insert("msg_global_config_saved", "La configuration globale a été sauvegardée avec succès !");
+    map.insert("msg_engine_saved", "Le moteur '{}' a été sauvegardé avec succès !");
+    map.insert("replay_from_here", "🔄 Reprendre à partir d'ici");
+    map.insert("restart_step", "⏯ Refaire cette étape");
+    map.insert("mark_completed", "✅ Marquer comme terminée");
+    map.insert("mark_pending", "⏳ Marquer comme en attente");
     map
 }
 
@@ -183,6 +200,7 @@ pub fn lexicon_en() -> std::collections::HashMap<&'static str, &'static str> {
     map.insert("tab_quickstart", " ❖ Help - Quick Start ");
     map.insert("tab_prompts", " ✎ Prompt Editor ");
     map.insert("tab_console", " ➤ Console & Monitor ");
+    map.insert("tab_task_graph", " 🪵 Task Graph ");
     map.insert("frame_generateur", " ✨ AI Prompt Generator ");
     map.insert("frame_timeline", " 🌐 Action Visual Timeline (Git Commit-Style) ");
     map.insert("frame_logs", " 🔴 Real-time Activity Console & Logs ");
@@ -202,6 +220,8 @@ pub fn lexicon_en() -> std::collections::HashMap<&'static str, &'static str> {
     map.insert("btn_sauver", "💾 Save Profile");
     map.insert("btn_opti_court", "🪄 Optimize this field");
     map.insert("btn_clear_logs", "🗑️ Clear Logs");
+    map.insert("btn_copy_logs", "📋 Copy Logs");
+    map.insert("btn_copy_report", "📋 Copy Report");
     map.insert("btn_generer_tout", "✨ Generate Prompts");
     map.insert("btn_lancer", "🚀 Start");
     map.insert("btn_arreter", "⏹️ Stop");
@@ -328,7 +348,7 @@ pub fn lexicon_en() -> std::collections::HashMap<&'static str, &'static str> {
     map.insert("chk_auto_validate_dangerous", "🔒 Auto-validate Dangerous Commands");
     map.insert("tip_auto_validate", "If enabled, standard AI actions (like clicks and scrolls) are executed without manual confirmation.");
     map.insert("tip_auto_validate_dangerous", "If enabled, potentially dangerous terminal commands (e.g. rm, format, sudo) are automatically validated.");
-    map.insert("tip_zoom_facteur", "Sets the zoom/scaling level of the interface. Forcing a fixed value (e.g. 100% or 125%) fixes infinite resizing loop bugs on Windows when dragging between screens with different DPI resolutions.");
+    map.insert("tip_zoom_facteur", "Sets the zoom/scaling level of the user interface. Useful if the application appears too small or too large on your screen.");
     map.insert("security_warning_titre", "⚠️ AI Actions");
     map.insert("security_warning_texte", "The AI has decided the following actions:\n\n{actions}\n\nDo you want to execute them?");
     map.insert("security_warning_yes", "✅ Execute");
@@ -349,7 +369,21 @@ pub fn lexicon_en() -> std::collections::HashMap<&'static str, &'static str> {
     map.insert("msg_profile_ready", "The prompts are generated and the profile '{}' is ready.");
     map.insert("chk_verify_cursor", "🔍 Verify cursor placement before click or write");
     map.insert("chk_detect_activity", "⏸ Auto-pause on user activity (mouse/keyboard)");
+    map.insert("chk_ssd_savings", "💾 SSD Write Savings (do not write screenshots to disk)");
+    map.insert("chk_keep_screen_awake", "🔌 Keep screen awake during orchestration");
+    map.insert("lbl_capture_save_folder", "📁 Save folder:");
+    map.insert("tip_capture_save_folder", "Select the folder where screenshots will be saved (when SSD Write Savings is disabled).");
+    map.insert("btn_choose_folder", "📁 Choose...");
     map.insert("status_user_active", "User active - Waiting...");
+    map.insert("lbl_save_success", "Save Successful");
+    map.insert("msg_profile_saved", "Profile '{}' saved successfully!");
+    map.insert("msg_config_saved", "Configuration saved successfully!");
+    map.insert("msg_global_config_saved", "Global configuration saved successfully!");
+    map.insert("msg_engine_saved", "Engine '{}' saved successfully!");
+    map.insert("replay_from_here", "🔄 Replay from here");
+    map.insert("restart_step", "⏯ Restart this step");
+    map.insert("mark_completed", "✅ Mark as Completed");
+    map.insert("mark_pending", "⏳ Mark as Pending");
     map
 }
 

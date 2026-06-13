@@ -2,17 +2,25 @@ pub mod components;
 pub mod global_config;
 pub mod prompt_editor;
 pub mod setup;
-pub mod quick_start;
+pub mod task_graph;
+pub mod console_timeline;
+pub mod engine_config;
+pub mod setup_import_export;
+
+
+#[cfg(test)]
+pub mod tests;
 
 use crate::app::{VibePilotApp, Tab};
-use crate::event_bus::EventType;
+use crate::event_bus::NotificationEvent;
 use eframe::egui;
 
-use components::{render_console_and_timeline_split, render_status_controls};
+use components::render_status_controls;
+use console_timeline::render_console_and_timeline_split;
 use global_config::render_config_tab;
 use prompt_editor::render_prompt_editor_tab;
 use setup::render_setup_tab;
-use quick_start::render_help_tab;
+use task_graph::render_task_graph_tab;
 
 pub fn render_main_window(ctx: &egui::Context, app: &mut VibePilotApp) {
     // Apply dark theme if enabled
@@ -49,9 +57,9 @@ pub fn render_main_window(ctx: &egui::Context, app: &mut VibePilotApp) {
             let tabs = [
                 (Tab::GlobalConfig, app.t("tab_config")),
                 (Tab::PromptEditor, app.t("tab_prompts")),
-                (Tab::Help, app.t("tab_quickstart")),
-                (Tab::Setup, app.t("tab_setup")),
                 (Tab::Console, app.t("tab_console")),
+                (Tab::TaskGraph, app.t("tab_task_graph")),
+                (Tab::Setup, app.t("tab_setup")),
             ];
             for (tab_type, tab_label) in tabs {
                 let is_active = app.active_tab == tab_type;
@@ -72,8 +80,8 @@ pub fn render_main_window(ctx: &egui::Context, app: &mut VibePilotApp) {
                     match app.active_tab {
                         Tab::GlobalConfig => render_config_tab(ui, app),
                         Tab::PromptEditor => render_prompt_editor_tab(ui, app),
-                        Tab::Help => render_help_tab(ui, app),
                         Tab::Setup => render_setup_tab(ui, app),
+                        Tab::TaskGraph => render_task_graph_tab(ui, app),
                         _ => {}
                     }
                 });
@@ -96,7 +104,7 @@ fn render_confirmations(ctx: &egui::Context, app: &mut VibePilotApp) {
                 ui.horizontal(|ui| {
                     if ui.button("Yes, Delete").clicked() {
                         app.config_repo.delete_profile(&profile_to_delete);
-                        app.bus.emit(EventType::Log(format!("Profile '{}' deleted", profile_to_delete)));
+                        app.bus.emit_notification(NotificationEvent::Log(format!("Profile '{}' deleted", profile_to_delete)));
                         if app.selected_profile == profile_to_delete {
                             app.selected_profile = app.get_first_available_profile_name();
                             app.current_config.dernier_profil = app.selected_profile.clone();
@@ -138,7 +146,7 @@ fn render_confirmations(ctx: &egui::Context, app: &mut VibePilotApp) {
                                     app.config_repo.delete_profile(&old_name);
                                     app.selected_profile = new_name.clone();
                                     app.current_config.dernier_profil = new_name.clone();
-                                    app.bus.emit(EventType::Log(format!("Profile '{}' renamed to '{}'", old_name, new_name)));
+                                    app.bus.emit_notification(NotificationEvent::Log(format!("Profile '{}' renamed to '{}'", old_name, new_name)));
                                 }
                             }
                         }
@@ -246,6 +254,32 @@ fn render_confirmations(ctx: &egui::Context, app: &mut VibePilotApp) {
                 ui.horizontal(|ui| {
                     if ui.button("OK").clicked() {
                         app.show_profile_ready_popup = None;
+                    }
+                });
+            });
+    }
+
+    if let Some(target) = app.show_save_success_popup.clone() {
+        let title = app.t("lbl_save_success");
+        egui::Window::new(title)
+            .collapsible(false)
+            .resizable(false)
+            .anchor(egui::Align2::CENTER_CENTER, egui::vec2(0.0, 0.0))
+            .show(ctx, |ui| {
+                let msg = if target == "config" {
+                    app.t("msg_config_saved")
+                } else if target == "global_config" {
+                    app.t("msg_global_config_saved")
+                } else if let Some(engine_name) = target.strip_prefix("engine:") {
+                    app.t("msg_engine_saved").replace("{}", engine_name)
+                } else {
+                    app.t("msg_profile_saved").replace("{}", &target)
+                };
+                ui.label(msg);
+                ui.add_space(8.0);
+                ui.horizontal(|ui| {
+                    if ui.button("OK").clicked() {
+                        app.show_save_success_popup = None;
                     }
                 });
             });

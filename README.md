@@ -10,7 +10,7 @@
 
 **Visual AI Automation Orchestrator** — A native Windows desktop application that uses vision-capable LLMs to observe your screen, make decisions, and autonomously operate your PC.
 
-[VibePilot in Action](#demo) · [Getting Started](#getting-started) · [API Docs](vibe_pilot_rust/docs/API.md) · [Report a Bug](https://github.com/Hidr4c/VibePilot/issues/new?template=bug-report.md)
+[VibePilot in Action](#demo) · [Getting Started](#getting-started) · [Architecture Docs](vibe_pilot_rust/docs/ARCHITECTURE.md) · [API Docs](vibe_pilot_rust/docs/API.md) · [Report a Bug](https://github.com/Hidr4c/VibePilot/issues/new?template=bug-report.md)
 
 <!-- Demo GIF placeholder — record with LICEcap or similar -->
 ![VibePilot Demo](vibe_pilot_rust/docs/demo.gif)
@@ -45,6 +45,8 @@ Record your own demo with [LICEcap](https://www.cockos.com/licecap/) (GIF) or [O
 ## Features
 
 - 🧠 **Vision-Based Decision Loop** — Screenshots → LLM analysis → Action execution → Repeat
+- 🖥️ **Adaptive Workspace Cropping** — Auto-detects active window bounding boxes on multi-monitor setups to send only relevant pixels to Vision LLMs
+- 📐 **Axis-by-Axis Calibration** — Programmatic mouse click target correction to resolve coordinate drifts dynamically
 - ⚙️ **Multiple LLM Engine Support** — LM Studio, Ollama, or any OpenAI-compatible API
 - 🎯 **Window Targeting** — Monitor specific applications or the entire desktop
 - 📝 **Prompt Profiles** — Save, load, rename, and manage multiple automation configurations
@@ -53,7 +55,7 @@ Record your own demo with [LICEcap](https://www.cockos.com/licecap/) (GIF) or [O
 - 🔒 **Safety Controls** — Manual confirmation for AI actions, with separate toggle for dangerous commands
 - 🌐 **Bilingual UI** — Full French and English localization
 - 🔐 **Encrypted Config** — Windows DPAPI-encrypted settings at rest
-- 📊 **Visual Action Timeline** — Git commit-style visualization of all AI actions
+- 📊 **Visual Action Timeline** — Git commit-style visualization of all AI actions with color-coded chronological click grouping
 - 🎨 **Dark/Light Theme** — Toggle between dark and light modes
 
 ## Getting Started
@@ -95,7 +97,7 @@ cargo build --release
 |-----|---------|
 | ⚙ Global Configuration | Engine selection, window monitoring, profile management |
 | ✎ Prompt Editor | Edit and manage prompt profiles (context, task, objective, directives) |
-| ❖ Quick Start | Describe your goal → AI generates the full prompt configuration |
+| ❖ Task Graph | View, edit, schedule, and visually trace the step-by-step AI task nodes |
 | ⛭ Setup | Application settings (zoom, language, theme, auto-validation) |
 
 ## Use Cases
@@ -189,26 +191,70 @@ Prompt Profile:
 
 ## Architecture
 
+VibePilot is built using a decoupled architecture aligning with **SOLID** principles, utilizing **Inversion of Control (IoC)** to abstract platform-specific APIs and external libraries behind interfaces (traits).
+
+### Inversion of Control & Platform Decoupling
+
+To enable future cross-platform compatibility (macOS/Linux) and robust integration testing, core services are separated into abstract interfaces and concrete implementations instantiated dynamically via **Factories**:
+
+- **Screen Capture**: Exposes `ScreenCapturerTrait` in [screen_capture/mod.rs](file:///e:/Dev/Projets/Agent_AI/vibe_pilot_rust/src/screen_capture/mod.rs). Resolved via `ScreenCapturerFactory` inside [screen_capture/factory.rs](file:///e:/Dev/Projets/Agent_AI/vibe_pilot_rust/src/screen_capture/factory.rs).
+- **Peripheral Simulation**: Exposes `PeripheralInput` in [peripheral_controller/mod.rs](file:///e:/Dev/Projets/Agent_AI/vibe_pilot_rust/src/peripheral_controller/mod.rs). Resolved via `PeripheralControllerFactory` inside [peripheral_controller/factory.rs](file:///e:/Dev/Projets/Agent_AI/vibe_pilot_rust/src/peripheral_controller/factory.rs).
+- **LLM Client**: Exposes `LlmProvider` in [llm_client/mod.rs](file:///e:/Dev/Projets/Agent_AI/vibe_pilot_rust/src/llm_client/mod.rs). Resolved via `LlmClientFactory` inside [llm_client/factory.rs](file:///e:/Dev/Projets/Agent_AI/vibe_pilot_rust/src/llm_client/factory.rs).
+- **Wait Management**: Exposes `WaitManagerTrait` in [services/wait_manager.rs](file:///e:/Dev/Projets/Agent_AI/vibe_pilot_rust/src/services/wait_manager.rs). Resolved via `WaitManagerFactory` inside [services/wait_manager_factory.rs](file:///e:/Dev/Projets/Agent_AI/vibe_pilot_rust/src/services/wait_manager_factory.rs).
+- **Configuration Storage**: Exposes `ConfigurationRepository` in [config/mod.rs](file:///e:/Dev/Projets/Agent_AI/vibe_pilot_rust/src/config/mod.rs). Resolved via `ConfigRepositoryFactory` inside [config/factory.rs](file:///e:/Dev/Projets/Agent_AI/vibe_pilot_rust/src/config/factory.rs).
+
+### SSD Write Economy (In-Memory Screenshots)
+
+To minimize SSD wear, VibePilot holds screenshot buffers strictly in memory during the execution loops.
+- **Default behavior**: Screenshots are not written to the disk.
+- **Customization**: Under the **Setup** tab, the user can untick the "SSD Write Savings" checkbox, which exposes a directory input path with a "Choose..." button. If disabled, screenshots are written to the selected folder (e.g. `/my/custom/path/last_capture.png`).
+
+### Source Directory Structure
+
 ```
 src/
 ├── main.rs                    # Entry point, window config
 ├── app.rs                     # Application state, event processing
-├── config.rs                  # DPAPI encryption, models, persistence
+├── app_services.rs            # Service tasks and async helpers
 ├── content.rs                 # FR/EN localization, AI prompt templates
 ├── defaults.rs                # Default profile factory
 ├── event_bus.rs               # Thread-safe event system (flume channels)
-├── llm_client.rs              # HTTP client for LLM APIs
-├── orchestrator.rs            # Core decision loop
-├── peripheral_controller.rs   # Mouse/keyboard simulation (rdev)
-├── screen_capture.rs          # Win32 GDI screen capture
+├── peripheral_controller/     # Decoupled mouse/keyboard input simulation
+│   ├── mod.rs                 # PeripheralInput and sub-traits definitions
+│   ├── concrete.rs            # Concrete platform implementation (Win32 / rdev)
+│   ├── factory.rs             # PeripheralControllerFactory builder
+│   └── mock.rs                # Testing mockup input structure
+├── screen_capture/            # Decoupled screen grabbing and window tracking
+│   ├── mod.rs                 # ScreenCapturerTrait definition
+│   ├── gdi.rs                 # Win32 GDI capture backend
+│   ├── factory.rs             # ScreenCapturerFactory builder
+│   └── mock.rs                # Testing mockup capture structure
 ├── version.rs                 # Build-time version info
-├── integration_tests.rs       # Comprehensive integration tests
+├── secure_store.rs            # Encrypted cache system
+├── append_store.rs            # Journal / action logs storage
+├── decision_router.rs         # Local heuristics & decision classification
+├── reflection.rs              # Local execution verification & visual diffing
+├── config/                    # Configuration management, models, and repositories
+│   ├── mod.rs                 # ConfigurationRepository trait exports
+│   ├── factory.rs             # ConfigRepositoryFactory builder
+│   └── repository.rs          # Encrypted local storage repo
+├── llm_client/                # Vision & Text LLM HTTP Clients and interfaces
+│   ├── mod.rs                 # LlmProvider trait definition
+│   ├── factory.rs             # LlmClientFactory builder
+│   └── client.rs              # Concrete reqwest HTTP client
+├── ocr/                       # Text detection (Tesseract & template matching)
+├── services/                  # Shared services (Wait manager, LLM, storage migrator)
+│   ├── wait_manager.rs        # WaitManagerTrait definition and timing wait checks
+│   └── wait_manager_factory.rs# WaitManagerFactory builder
+├── vision/                    # Zoom strategy & cache managers
+├── integration_tests/         # Egui and Orchestrator integration tests
+├── orchestrator/              # Decision loop execution & workspace resolvers
 └── ui/
     ├── mod.rs                 # UI entry point, tab routing, modals
     ├── components.rs          # Timeline, console, footer controls
     ├── global_config.rs       # Engine/window/profile config tab
     ├── prompt_editor.rs       # Prompt editing with profile management
-    ├── quick_start.rs         # AI prompt generator
+    ├── task_graph.rs          # Visual task graph scheduler UI
     └── setup.rs               # Settings (zoom, language, toggles)
 ```
 
@@ -216,7 +262,7 @@ src/
 
 ```bash
 cargo test
-# Expected: 87 tests, 0 failures
+# Expected: 438 tests, 0 failures
 ```
 
 ## Safety

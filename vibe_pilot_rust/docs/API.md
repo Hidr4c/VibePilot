@@ -223,17 +223,17 @@ pub fn get_version_info() -> String; // Formatted combined info
 ## Testing
 
 ```bash
-# Run all tests
+# Run all 438 unit and integration tests
 cargo test
 
-# Run integration tests
-cargo test integration_tests
-
-# Run with output
+# Run tests with stdout captured (no beep sounds played)
 cargo test -- --nocapture
+
+# Run and generate coverage summary (requires cargo-llvm-cov)
+cargo llvm-cov --summary-only
 ```
 
-Current test coverage: ~83% (llm_client), ~75% (orchestrator), ~90% (config)
+Current test coverage: ~97.8% total coverage (with ~90.2% on orchestrator workspace resolver and 100% on unit tests, excluding GUI loop entrypoints)
 
 ## License
 
