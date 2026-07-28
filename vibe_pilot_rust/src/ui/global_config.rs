@@ -7,6 +7,58 @@ use eframe::egui;
 // ============================================================
 pub fn render_config_tab(ui: &mut egui::Ui, app: &mut VibePilotApp) {
     let available_width = ui.available_width();
+    let is_fr = app.current_config.langue == "Français";
+
+    // --- Configuration Inconsistency Alerts & Warnings ---
+    let mut conflicts = Vec::new();
+
+    let has_target_window = !app.current_config.fenetres_surveillees.is_empty()
+        && !app.current_config.fenetres_surveillees[0].to_lowercase().contains("all screens")
+        && !app.current_config.fenetres_surveillees[0].to_lowercase().contains("tous les")
+        && !app.current_config.fenetres_surveillees[0].to_lowercase().contains("desktop")
+        && !app.current_config.fenetres_surveillees[0].is_empty();
+
+    if has_target_window && !app.current_config.activer_recadrage_workspace {
+        conflicts.push(if is_fr {
+            "⚠️ Une fenêtre cible est définie, mais « Recadrage Workspace » est désactivé. L'IA utilisera tout l'écran, ce qui perturbera la précision des clics."
+        } else {
+            "⚠️ Target window selected but 'Workspace Cropping' is disabled. AI will use the full desktop, causing click coordinate misalignment."
+        });
+    }
+
+    if app.current_config.activer_roi && app.current_config.activer_recadrage_workspace {
+        conflicts.push(if is_fr {
+            "⚠️ Conflit : La 'ROI fixe' et le 'Recadrage Workspace' sont activés simultanément. La ROI fixe est prioritaire."
+        } else {
+            "⚠️ Conflict: Both 'Fixed ROI' and 'Workspace Cropping' are enabled. Fixed ROI takes precedence."
+        });
+    }
+
+    if app.current_config.decomposer_taches && app.current_config.objectif.trim().is_empty() {
+        conflicts.push(if is_fr {
+            "⚠️ TaskGraph activé mais l'objectif principal est vide. Spécifiez une tâche dans l'Éditeur."
+        } else {
+            "⚠️ TaskGraph is enabled but the main objective is empty. Define your task in the Editor tab."
+        });
+    }
+
+    if !conflicts.is_empty() {
+        ui.group(|ui| {
+            ui.vertical(|ui| {
+                ui.horizontal(|ui| {
+                    ui.colored_label(
+                        egui::Color32::from_rgb(255, 140, 0),
+                        egui::RichText::new(if is_fr { "⚠️ Alertes de Configuration" } else { "⚠️ Configuration Warnings" }).strong()
+                    );
+                });
+                ui.separator();
+                for conflict in &conflicts {
+                    ui.colored_label(egui::Color32::from_rgb(255, 165, 0), *conflict);
+                }
+            });
+        });
+        ui.add_space(8.0);
+    }
 
     // --- Section 1: AI Engine & Model ---
     crate::ui::engine_config::render_engine_config_section(ui, app);
@@ -17,104 +69,149 @@ pub fn render_config_tab(ui: &mut egui::Ui, app: &mut VibePilotApp) {
     // --- Section 1.5: Advanced Intelligence & Guidance ---
     ui.group(|ui| {
         ui.horizontal(|ui| {
-            ui.label(if app.current_config.langue == "Français" { "🧠 Intelligence & Guidage Avancé" } else { "🧠 Advanced Intelligence & Guidance" });
+            ui.label(egui::RichText::new(if is_fr { "🧠 Intelligence & Guidage Avancé" } else { "🧠 Advanced Intelligence & Guidance" }).strong());
         });
         ui.separator();
         
-        ui.horizontal(|ui| {
-            ui.checkbox(
-                &mut app.current_config.decomposer_taches,
-                if app.current_config.langue == "Français" {
-                    "Décomposer l'objectif en graphe de sous-tâches (TaskGraph)"
-                } else {
-                    "Decompose objective into a task graph (TaskGraph)"
-                }
-            );
-            
-            ui.add_space(16.0);
-            
-            ui.checkbox(
-                &mut app.current_config.activer_reflexion,
-                if app.current_config.langue == "Français" {
-                    "Activer la réflexion visuelle post-action (Reflection)"
-                } else {
-                    "Enable post-action visual reflection (Reflection)"
-                }
-            );
+        // Category 1: Planification & Réflexion / Planning & Reasoning
+        ui.label(egui::RichText::new(if is_fr { "🎯 Planification & Réflexion" } else { "🎯 Planning & Reasoning" }).strong().color(ui.visuals().hyperlink_color));
+        ui.add_space(2.0);
+        
+        // 1.1 TaskGraph
+        ui.checkbox(
+            &mut app.current_config.decomposer_taches,
+            if is_fr {
+                "Décomposer l'objectif principal en graphe de tâches (TaskGraph)"
+            } else {
+                "Decompose main objective into a task graph (TaskGraph)"
+            }
+        );
+        ui.indent("desc_decomposer_taches", |ui| {
+            ui.weak(if is_fr {
+                "Divise la demande principale en sous-tâches logiques exécutées séquentiellement et affichées sous forme de graphe."
+            } else {
+                "Splits the main request into logical sub-tasks executed sequentially and displayed in a task graph."
+            });
+            if app.current_config.decomposer_taches {
+                ui.add_space(4.0);
+                ui.horizontal(|ui| {
+                    ui.label(if is_fr { "Tentatives max par tâche :" } else { "Max attempts per sub-task:" });
+                    ui.add(egui::Slider::new(&mut app.current_config.max_tentatives_par_tache, 1..=10));
+                });
+            }
         });
         
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.checkbox(
-                &mut app.current_config.pipeline_vision_avance,
-                if app.current_config.langue == "Français" {
-                    "Activer le zoom dynamique sur zone d'intérêt (Zoom VLM)"
-                } else {
-                    "Enable dynamic zoom on region of interest (Zoom VLM)"
-                }
-            );
-        });
+        ui.add_space(6.0);
         
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.checkbox(
-                &mut app.current_config.activer_systeme_fast_slow,
-                if app.current_config.langue == "Français" {
-                    "Activer le routage d'actions rapides (Fast/Slow)"
-                } else {
-                    "Enable fast/slow action routing (Fast/Slow)"
-                }
-            );
-            
-            ui.add_space(16.0);
-            
-            ui.checkbox(
-                &mut app.current_config.activer_compression_historique,
-                if app.current_config.langue == "Français" {
-                    "Activer la compression d'historique de contexte"
-                } else {
-                    "Enable context history compression"
-                }
-            );
-        });
-        
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.checkbox(
-                &mut app.current_config.economie_ecriture_ssd,
-                if app.current_config.langue == "Français" {
-                    "Économie d'écriture SSD (Vacation de 5 min)"
-                } else {
-                    "SSD Write Protection (5-min vacation cache)"
-                }
-            );
-
-            ui.add_space(16.0);
-
-            ui.checkbox(
-                &mut app.current_config.activer_recadrage_workspace,
-                if app.current_config.langue == "Français" {
-                    "Activer le recadrage adaptatif de la zone de travail"
-                } else {
-                    "Enable adaptive workspace cropping"
-                }
-            );
-        });
-        
-        ui.add_space(4.0);
-        ui.horizontal(|ui| {
-            ui.checkbox(
-                &mut app.current_config.activer_roi,
-                if app.current_config.langue == "Français" {
-                    "Activer la zone d'intérêt (ROI) fixe"
-                } else {
-                    "Enable fixed Region of Interest (ROI)"
-                }
-            );
+        // 1.2 Reflection
+        ui.checkbox(
+            &mut app.current_config.activer_reflexion,
+            if is_fr {
+                "Valider visuellement chaque action (Visual Reflection)"
+            } else {
+                "Visually validate each action (Visual Reflection)"
+            }
+        );
+        ui.indent("desc_activer_reflexion", |ui| {
+            ui.weak(if is_fr {
+                "Prend une capture d'écran après chaque clic ou saisie pour vérifier si l'action a été correctement effectuée."
+            } else {
+                "Takes a screenshot after each click or input to verify if the action was executed successfully."
+            });
         });
 
-        if app.current_config.activer_roi {
-            ui.indent("roi_settings_indent", |ui| {
+        ui.add_space(10.0);
+        ui.separator();
+        ui.add_space(4.0);
+
+        // Category 2: Vision & Zone de Travail / Vision & Workspace
+        ui.label(egui::RichText::new(if is_fr { "👁️ Vision & Zone de Travail" } else { "👁️ Vision & Workspace" }).strong().color(ui.visuals().hyperlink_color));
+        ui.add_space(2.0);
+
+        // 2.1 Zoom VLM
+        ui.checkbox(
+            &mut app.current_config.pipeline_vision_avance,
+            if is_fr {
+                "Zoom de précision sur la zone ciblée (Zoom VLM)"
+            } else {
+                "High-precision zoom on target area (Zoom VLM)"
+            }
+        );
+        ui.indent("desc_pipeline_vision_avance", |ui| {
+            ui.weak(if is_fr {
+                "Agrandit temporairement la zone visée par le modèle pour l'aider à interagir avec les petits éléments."
+            } else {
+                "Temporarily enlarges the target area to help the model interact with small elements."
+            });
+        });
+
+        ui.add_space(6.0);
+
+        // 2.2 Workspace Crop
+        ui.checkbox(
+            &mut app.current_config.activer_recadrage_workspace,
+            if is_fr {
+                "Recadrer les captures sur l'application (Workspace Crop)"
+            } else {
+                "Crop captures to target application (Workspace Crop)"
+            }
+        );
+        ui.indent("desc_activer_recadrage_workspace", |ui| {
+            ui.weak(if is_fr {
+                "Limite la capture visuelle aux dimensions de la fenêtre ciblée au lieu de capturer tout l'écran."
+            } else {
+                "Restricts visual capture to the active application window bounds instead of the entire screen."
+            });
+            if has_target_window && !app.current_config.activer_recadrage_workspace {
+                ui.colored_label(
+                    egui::Color32::from_rgb(255, 140, 0),
+                    if is_fr {
+                        "⚠️ Fortement Recommandé : Activez cette case car vous ciblez une fenêtre spécifique."
+                    } else {
+                        "⚠️ Strongly Recommended: Enable this option since you targeted a specific window."
+                    }
+                );
+            }
+        });
+
+        ui.add_space(6.0);
+
+        // 2.3 Visual Tracing
+        ui.checkbox(
+            &mut app.current_config.trace_actions_visuelles,
+            if is_fr {
+                "Enregistrer les micro-captures des actions (Visual Tracing)"
+            } else {
+                "Save micro-captures of actions (Visual Tracing)"
+            }
+        );
+        ui.indent("desc_trace_actions_visuelles", |ui| {
+            ui.weak(if is_fr {
+                "Capture et affiche de petites vignettes centrées sur la zone du clic dans l'onglet des tâches."
+            } else {
+                "Captures and displays small cropped thumbnails centered on clicked zones in the tasks tab."
+            });
+        });
+
+        ui.add_space(6.0);
+
+        // 2.4 ROI
+        ui.checkbox(
+            &mut app.current_config.activer_roi,
+            if is_fr {
+                "Restreindre les actions à une zone fixe (Fixed ROI)"
+            } else {
+                "Restrict actions to a fixed zone (Fixed ROI)"
+            }
+        );
+        ui.indent("desc_activer_roi", |ui| {
+            ui.weak(if is_fr {
+                "Limite l'analyse et les clics de l'IA à une portion rectangulaire spécifique de l'écran."
+            } else {
+                "Limits AI analysis and mouse clicks to a specific rectangular sub-region of the screen."
+            });
+            if app.current_config.activer_roi {
+                ui.add_space(4.0);
                 ui.horizontal(|ui| {
                     ui.label("X:");
                     ui.add(egui::DragValue::new(&mut app.current_config.roi_x).range(0..=9999));
@@ -128,16 +225,87 @@ pub fn render_config_tab(ui: &mut egui::Ui, app: &mut VibePilotApp) {
                     ui.label("H:");
                     ui.add(egui::DragValue::new(&mut app.current_config.roi_height).range(1..=9999));
                 });
+            }
+        });
+
+        ui.add_space(10.0);
+        ui.separator();
+        ui.add_space(4.0);
+
+        // Category 3: Performance & Ressources / Performance & Resources
+        ui.label(egui::RichText::new(if is_fr { "⚙️ Performance & Ressources" } else { "⚙️ Performance & Resources" }).strong().color(ui.visuals().hyperlink_color));
+        ui.add_space(2.0);
+
+        // 3.1 Fast/Slow
+        ui.checkbox(
+            &mut app.current_config.activer_systeme_fast_slow,
+            if is_fr {
+                "Routage rapide pour actions simples (Fast/Slow)"
+            } else {
+                "Fast routing for simple actions (Fast/Slow)"
+            }
+        );
+        ui.indent("desc_activer_systeme_fast_slow", |ui| {
+            ui.weak(if is_fr {
+                "Exécute les actions simples (comme l'attente) avec des règles locales sans appeler l'IA."
+            } else {
+                "Executes simple actions (like waiting) with local rules without calling the main AI."
             });
-        }
-        
-        if app.current_config.decomposer_taches {
-            ui.add_space(4.0);
-            ui.horizontal(|ui| {
-                ui.label(if app.current_config.langue == "Français" { "Tentatives max par tâche :" } else { "Max attempts per sub-task:" });
-                ui.add(egui::Slider::new(&mut app.current_config.max_tentatives_par_tache, 1..=10));
+        });
+
+        ui.add_space(6.0);
+
+        // 3.2 Context History Compression
+        ui.checkbox(
+            &mut app.current_config.activer_compression_historique,
+            if is_fr {
+                "Compresser l'historique de contexte"
+            } else {
+                "Compress context history"
+            }
+        );
+        ui.indent("desc_activer_compression_historique", |ui| {
+            ui.weak(if is_fr {
+                "Résume l'historique des actions précédentes dans le prompt pour économiser les jetons IA."
+            } else {
+                "Summarizes previous action history in the prompt to save AI tokens."
             });
-        }
+        });
+
+        ui.add_space(6.0);
+
+        // 3.3 SSD Caching
+        ui.checkbox(
+            &mut app.current_config.economie_ecriture_ssd,
+            if is_fr {
+                "Économiser les écritures SSD (Cache RAM de 5 min)"
+            } else {
+                "Reduce SSD write wear (RAM Caching)"
+            }
+        );
+        ui.indent("desc_economie_ecriture_ssd", |ui| {
+            ui.weak(if is_fr {
+                "Stocke les logs et le graphe en RAM avec écriture sur disque toutes les 5 minutes."
+            } else {
+                "Stores logs and graph in RAM with writing to disk every 5 minutes."
+            });
+        });
+
+        ui.add_space(6.0);
+
+        // 3.4 Auto-pause on user activity
+        let detect_activity_lbl = app.t("chk_detect_activity");
+        ui.checkbox(
+            &mut app.current_config.detecter_activite_utilisateur,
+            detect_activity_lbl
+        );
+        ui.indent("desc_detecter_activite_utilisateur", |ui| {
+            ui.weak(if is_fr {
+                "Met en pause l'IA si un mouvement de la souris ou une touche de clavier de l'utilisateur est détecté."
+            } else {
+                "Pauses the AI if mouse movement or keyboard input from the user is detected."
+            });
+        });
     });
 
     ui.add_space(12.0);
@@ -267,19 +435,22 @@ pub fn render_config_tab(ui: &mut egui::Ui, app: &mut VibePilotApp) {
                     app.show_save_success_popup = Some(app.selected_profile.clone());
                 }
             }
-            
+
+            // Modified Indicator
+            if app.is_profile_modified() {
+                ui.add_space(8.0);
+                let modified_text = if app.current_config.langue == "Français" { "⚠️ Modifié (non sauvegardé)" } else { "⚠️ Modified (unsaved)" };
+                ui.colored_label(egui::Color32::from_rgb(255, 140, 0), modified_text);
+            }
+
             if selected_val != app.selected_profile && !selected_val.is_empty() {
                 // User selected an existing profile from the dropdown
                 app.load_profile(&selected_val);
             } else if response.changed() {
                 // User typed something
                 let trimmed = current_profile_name.trim().to_string();
-                if profiles.contains(&trimmed) {
-                    app.load_profile(&trimmed);
-                } else {
-                    app.selected_profile = trimmed.clone();
-                    app.quick_start_profile_name = trimmed;
-                }
+                app.selected_profile = trimmed.clone();
+                app.quick_start_profile_name = trimmed;
             }
         });
     });

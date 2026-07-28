@@ -281,18 +281,19 @@ async fn test_orchestrator_run_loop_session_timeout() {
         actions: std::sync::Mutex::new(vec![]),
     });
 
-    let orchestrator = VibePilotOrchestrator::new(
+    let orchestrator = Arc::new(VibePilotOrchestrator::new(
         config_repo.clone(),
         llm_client.clone(),
         capturer.clone(),
         controller.clone(),
         Arc::new(MockWaitManager),
         bus.clone(),
-    );
+    ));
 
     // We start the loop, then advance time past 3600 seconds
+    let orchestrator_clone = orchestrator.clone();
     let handle = tokio::spawn(async move {
-        orchestrator.run_loop().await
+        orchestrator_clone.run_loop().await
     });
 
     // Let the loop run its first iteration and initialize session_start
@@ -309,4 +310,5 @@ async fn test_orchestrator_run_loop_session_timeout() {
     assert!(err_str.contains("Session timeout"));
 
     running.store(false, std::sync::atomic::Ordering::Relaxed);
+    *orchestrator.state.lock().unwrap() = crate::orchestrator::OrchestratorState::Idle;
 }

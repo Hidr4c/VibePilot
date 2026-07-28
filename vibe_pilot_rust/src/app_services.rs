@@ -47,6 +47,7 @@ impl VibePilotApp {
                             tooltip: display.clone(),
                             logs: Vec::new(),
                             report: String::new(),
+                            action_image: None,
                         });
 
                         let logger = self.action_logger.clone();
@@ -78,6 +79,11 @@ impl VibePilotApp {
                         self.status_text = message.clone();
                         self.status_color = "red".to_string();
                         self.send_webhook_notification(&format!("🚨 Loop detected alert: {}", message));
+                    }
+                    NotificationEvent::AppendActionCrop(bytes) => {
+                        if let Some(step) = self.structured_steps.last_mut() {
+                            step.action_image = Some(bytes);
+                        }
                     }
                     NotificationEvent::ClearActionConfirmation => {
                         self.pending_action = None;
@@ -433,6 +439,7 @@ impl VibePilotApp {
         self.current_config.theme_sombre = true;
         self.current_config.prompt_reprise = None;
         self.current_config.zoom_facteur = None;
+        self.current_config.trace_actions_visuelles = false;
         self.selected_profile = self.get_first_available_profile_name();
         self.quick_start_profile_name = self.get_first_available_profile_name();
         self.bus.emit_notification(NotificationEvent::Log("Everything reset to default".to_string()));

@@ -187,7 +187,8 @@ pub fn get_bootstrap_config_path() -> PathBuf {
     
     // Check if we are running inside cargo test
     let thread_name = std::thread::current().name().unwrap_or("main").to_string();
-    if thread_name != "main" && (thread_name.contains("test") || std::env::args().any(|arg| arg.contains("test"))) {
+    let is_test_arg = std::env::args().skip(1).any(|arg| arg.contains("test"));
+    if thread_name != "main" && (thread_name.contains("test") || is_test_arg) {
         let safe_name = thread_name.chars()
             .filter(|c| c.is_alphanumeric() || *c == '_' || *c == ':')
             .map(|c| if c == ':' { '_' } else { c })
@@ -296,10 +297,19 @@ impl ActionLogger {
         // Close the current file handle
         *guard = None;
 
-        // Rotate: current -> .old
-        let backup_path = self.log_path.with_extension("log.old");
-        let _ = fs::remove_file(&backup_path);
-        let _ = fs::rename(&self.log_path, &backup_path);
+        // Rotate: log -> log.1 -> log.2 -> log.3
+        let path_1 = self.log_path.with_extension("log.1");
+        let path_2 = self.log_path.with_extension("log.2");
+        let path_3 = self.log_path.with_extension("log.3");
+
+        let _ = fs::remove_file(&path_3);
+        if path_2.exists() {
+            let _ = fs::rename(&path_2, &path_3);
+        }
+        if path_1.exists() {
+            let _ = fs::rename(&path_1, &path_2);
+        }
+        let _ = fs::rename(&self.log_path, &path_1);
 
         // Open a fresh log file
         *guard = fs::File::create(&self.log_path).ok();

@@ -63,6 +63,9 @@ impl<T: Serialize + for<'de> Deserialize<'de> + Clone + Send + Sync + DpapiConfi
 
         if path.exists() {
             if let Err(e) = store.load() {
+                if e.contains("Decryption failed") {
+                    return Err(format!("Decryption failed: the data might be encrypted with a different key or keyring is inaccessible. Details: {}", e));
+                }
                 eprintln!("⚠️ Secure store load failed, renaming to .corrupt and starting fresh: {}", e);
                 let corrupt_path = path.with_extension("corrupt");
                 let _ = fs::rename(&path, &corrupt_path);
@@ -233,59 +236,144 @@ impl<T: Serialize + for<'de> Deserialize<'de> + Clone + Send + Sync + DpapiConfi
 
 }
 
-pub(crate) fn get_key(base_dir: &Path) -> Result<[u8; 32], String> {
-    let key_path = base_dir.join("key.enc");
-    if key_path.exists() {
-        let encrypted_bytes = fs::read(&key_path)
-            .map_err(|e| format!("Failed to read key file: {}", e))?;
+fn hex_decode(s: &str) -> Option<Vec<u8>> {
+    if s.len() % 2 != 0 { return None; }
+    let mut res = Vec::with_capacity(s.len() / 2);
+    for chunk in s.as_bytes().chunks(2) {
+        let chunk_str = std::str::from_utf8(chunk).ok()?;
+        let val = u8::from_str_radix(chunk_str, 16).ok()?;
+        res.push(val);
+    }
+    Some(res)
+}
 
-        #[cfg(target_os = "windows")]
-        {
-            if let Some(decrypted) = crate::config::dpapi::decrypt(&encrypted_bytes) {
-                if decrypted.len() == 32 {
-                    let mut key = [0u8; 32];
-                    key.copy_from_slice(&decrypted);
-                    return Ok(key);
+fn hex_encode(bytes: &[u8]) -> String {
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
+}
+
+pub(crate) fn get_key(base_dir: &Path) -> Result<[u8; 32], String> {
+    // Check if we are running in a test context.
+    // We bypass keyring in tests to avoid global state pollution and CI issues.
+    let is_test = cfg!(test)
+        || std::env::var("VIBEPILOT_TEST").is_ok()
+        || std::thread::current().name().unwrap_or("main").contains("test")
+        || std::env::args().skip(1).any(|arg| arg.contains("test"));
+
+    let stable_username = "VibePilot_Master_Key".to_string();
+    let key_path = base_dir.join("key.enc");
+
+    // 1. Try key.enc file first (DPAPI encrypted on Windows, raw on others)
+    if key_path.exists() {
+        if let Ok(encrypted_bytes) = fs::read(&key_path) {
+            let mut key = [0u8; 32];
+            let mut key_loaded = false;
+
+            #[cfg(target_os = "windows")]
+            {
+                if let Some(decrypted) = crate::config::dpapi::decrypt(&encrypted_bytes) {
+                    if decrypted.len() == 32 {
+                        key.copy_from_slice(&decrypted);
+                        key_loaded = true;
+                    }
                 }
             }
-            // Plaintext fallback
-            if encrypted_bytes.len() == 32 {
-                let mut key = [0u8; 32];
+
+            if !key_loaded && encrypted_bytes.len() == 32 {
                 key.copy_from_slice(&encrypted_bytes);
-                return Ok(key);
+                key_loaded = true;
             }
-        }
-        #[cfg(not(target_os = "windows"))]
-        {
-            if encrypted_bytes.len() == 32 {
-                let mut key = [0u8; 32];
-                key.copy_from_slice(&encrypted_bytes);
+
+            if key_loaded {
                 return Ok(key);
             }
         }
     }
 
-    // Generate new key
+    // 2. Fallback to native keyring if key.enc doesn't exist
+    if !is_test {
+        // Try stable keyring entry
+        if let Ok(entry) = keyring::Entry::new("VibePilot", &stable_username) {
+            if let Ok(password) = entry.get_password() {
+                if let Some(decoded) = hex_decode(&password) {
+                    if decoded.len() == 32 {
+                        let mut key = [0u8; 32];
+                        key.copy_from_slice(&decoded);
+                        // Save back to key.enc for portability and sandbox compatibility
+                        let _ = save_key_to_file(&key_path, &key);
+                        return Ok(key);
+                    }
+                }
+            }
+        }
+
+        // Try legacy path-based username
+        use sha2::Digest;
+        let mut hasher = sha2::Sha256::new();
+        hasher.update(base_dir.to_string_lossy().as_bytes());
+        let hash_hex: String = hasher.finalize().iter().map(|b| format!("{:02x}", b)).collect();
+        let legacy_username = format!("EncryptionKey_{}", &hash_hex[..12]);
+
+        if let Ok(legacy_entry) = keyring::Entry::new("VibePilot", &legacy_username) {
+            if let Ok(password) = legacy_entry.get_password() {
+                if let Some(decoded) = hex_decode(&password) {
+                    if decoded.len() == 32 {
+                        let mut key = [0u8; 32];
+                        key.copy_from_slice(&decoded);
+                        // Save back to key.enc
+                        let _ = save_key_to_file(&key_path, &key);
+                        return Ok(key);
+                    }
+                }
+            }
+        }
+    }
+
+    // 3. Generate new key
     let mut key = [0u8; 32];
     rand::thread_rng().fill_bytes(&mut key);
 
-    #[cfg(target_os = "windows")]
-    {
-        if let Some(encrypted) = crate::config::dpapi::encrypt(&key) {
-            fs::write(&key_path, encrypted)
-                .map_err(|e| format!("Failed to write encrypted key: {}", e))?;
-        } else {
-            return Err("Failed to encrypt new key with DPAPI".to_string());
+    // Save to file
+    save_key_to_file(&key_path, &key)?;
+
+    // Also attempt to save to stable keyring as an extra backup if not in test
+    if !is_test {
+        if let Ok(entry) = keyring::Entry::new("VibePilot", &stable_username) {
+            let hex_pwd = hex_encode(&key);
+            let _ = entry.set_password(&hex_pwd);
         }
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        fs::write(&key_path, &key)
-            .map_err(|e| format!("Failed to write key: {}", e))?;
     }
 
     Ok(key)
 }
+
+fn save_key_to_file(key_path: &Path, key: &[u8; 32]) -> Result<(), String> {
+    #[cfg(target_os = "windows")]
+    {
+        if let Some(encrypted) = crate::config::dpapi::encrypt(key) {
+            fs::write(key_path, encrypted)
+                .map_err(|e| format!("Failed to write encrypted key: {}", e))?;
+        } else {
+            return Err("Failed to encrypt key with DPAPI".to_string());
+        }
+    }
+    #[cfg(not(target_os = "windows"))]
+    {
+        fs::write(key_path, key)
+            .map_err(|e| format!("Failed to write key: {}", e))?;
+        
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            if let Ok(meta) = fs::metadata(key_path) {
+                let mut perms = meta.permissions();
+                perms.set_mode(0o600);
+                let _ = fs::set_permissions(key_path, perms);
+            }
+        }
+    }
+    Ok(())
+}
+
 
 impl<T: Serialize + for<'de> Deserialize<'de> + Clone + Send + Sync + DpapiConfigurable + 'static> Drop for SecureStoreInner<T> {
     fn drop(&mut self) {

@@ -42,18 +42,21 @@ mod ui_tests {
                 tooltip: "Thinking".to_string(),
                 logs: vec!["[12:00:00] Log 1".to_string(), "[12:00:01] Log 2".to_string()],
                 report: "[12:00:00] Report step".to_string(),
+                action_image: None,
             },
             StructuredStep {
                 action_type: "CLICK_AND_TYPE".to_string(),
                 tooltip: "Clicked".to_string(),
                 logs: vec![],
                 report: String::new(),
+                action_image: None,
             },
             StructuredStep {
                 action_type: "SUCCESS".to_string(),
                 tooltip: "Done".to_string(),
                 logs: vec!["[12:00:05] Success log".to_string()],
                 report: String::new(),
+                action_image: None,
             },
         ];
 
@@ -92,7 +95,17 @@ mod ui_tests {
                 app.bottom_tab = 1;
                 render_activity_console(ui, &mut app, 150.0);
 
-                // Split timeline and logs
+                // Split timeline and logs with all combinations to cover export/save buttons
+                app.current_config.langue = "English".to_string();
+                app.bottom_tab = 0;
+                render_console_and_timeline_split(ui, &mut app, 200.0);
+                app.bottom_tab = 1;
+                render_console_and_timeline_split(ui, &mut app, 200.0);
+
+                app.current_config.langue = "Français".to_string();
+                app.bottom_tab = 0;
+                render_console_and_timeline_split(ui, &mut app, 200.0);
+                app.bottom_tab = 1;
                 render_console_and_timeline_split(ui, &mut app, 200.0);
 
                 // Status controls
@@ -484,6 +497,53 @@ mod ui_tests {
     fn test_render_setup_tab_function_signature() {
         // Verify the function exists and is accessible
         let _ = crate::ui::setup::render_setup_tab;
+    }
+
+    #[test]
+    fn test_render_import_export_group_directly() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        let egui_ctx = egui::Context::default();
+        let _dir = temp_dir("ui_import_export_group_directly");
+        let mut app = VibePilotApp::new(&egui_ctx);
+
+        let _ = egui_ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                app.current_config.langue = "English".to_string();
+                crate::ui::setup_import_export::render_import_export_group(ui, &mut app);
+
+                app.current_config.langue = "Français".to_string();
+                crate::ui::setup_import_export::render_import_export_group(ui, &mut app);
+            });
+        });
+
+        cleanup("ui_import_export_group_directly");
+    }
+
+    #[test]
+    fn test_render_engine_config_section_directly() {
+        let _lock = TEST_LOCK.lock().unwrap();
+        let egui_ctx = egui::Context::default();
+        let _dir = temp_dir("ui_engine_config_section_directly");
+        let mut app = VibePilotApp::new(&egui_ctx);
+
+        let _ = egui_ctx.run(egui::RawInput::default(), |ctx| {
+            egui::CentralPanel::default().show(ctx, |ui| {
+                app.current_config.langue = "English".to_string();
+                app.current_config.utiliser_moteur_vision_dedie = true;
+                app.current_config.auth_mode = "api_key".to_string();
+                app.current_config.auth_mode_vision = "basic_auth".to_string();
+                app.show_add_engine = true;
+                crate::ui::engine_config::render_engine_config_section(ui, &mut app);
+
+                app.current_config.langue = "Français".to_string();
+                app.current_config.utiliser_moteur_vision_dedie = false;
+                app.current_config.auth_mode = "basic_auth".to_string();
+                app.show_add_engine = false;
+                crate::ui::engine_config::render_engine_config_section(ui, &mut app);
+            });
+        });
+
+        cleanup("ui_engine_config_section_directly");
     }
 }
 

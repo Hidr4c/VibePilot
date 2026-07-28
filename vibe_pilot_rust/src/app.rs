@@ -17,6 +17,8 @@ pub struct StructuredStep {
     pub tooltip: String,
     pub logs: Vec<String>,
     pub report: String,
+    #[serde(skip)]
+    pub action_image: Option<Vec<u8>>,
 }
 
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize, PartialEq)]
@@ -79,6 +81,28 @@ pub struct VibePilotApp {
 
     pub lexicon_fr: std::collections::HashMap<&'static str, &'static str>,
     pub lexicon_en: std::collections::HashMap<&'static str, &'static str>,
+    pub action_textures: std::collections::HashMap<usize, egui::TextureHandle>,
+
+    pub macro_recorder: std::sync::Arc<dyn crate::macro_recorder::MacroRecorderTrait>,
+    pub macro_sequence: crate::macro_recorder::MacroSequence,
+    pub macro_session_manager: crate::macro_recorder::MacroSessionManager,
+    pub macro_hotkey_config: crate::macro_recorder::HotkeyConfig,
+    pub macro_iterations: u32,
+    pub macro_start_delay_sec: u32,
+    pub macro_record_start_delay_sec: u32,
+    pub macro_countdown_remaining: std::sync::Arc<std::sync::Mutex<Option<u32>>>,
+    pub macro_recording_countdown_remaining: std::sync::Arc<std::sync::Mutex<Option<u32>>>,
+    pub macro_active_playback_step: std::sync::Arc<std::sync::Mutex<Option<(u32, usize)>>>,
+    pub is_playing_macro: bool,
+    pub macro_playback_cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+    pub selected_macro_node: Option<u64>,
+    pub macro_undo_stack: Vec<crate::macro_recorder::MacroSequence>,
+    pub macro_redo_stack: Vec<crate::macro_recorder::MacroSequence>,
+    pub was_recording_macro: bool,
+    pub node_binding_capture: Option<u64>,
+    pub show_macro_save_confirm: bool,
+    pub macro_script_text: String,
+    pub macro_view_mode_text: bool,
 }
 
 #[derive(Debug, PartialEq, Clone, Copy)]
@@ -87,6 +111,7 @@ pub enum Tab {
     PromptEditor,
     Console,
     TaskGraph,
+    MacroRecorder,
     Setup,
 }
 
@@ -94,9 +119,25 @@ impl VibePilotApp {
     pub fn new(egui_ctx: &egui::Context) -> Self {
         let (bus, receiver) = EventBus::new();
         
+        let is_test = cfg!(test)
+            || std::env::var("VIBEPILOT_TEST").is_ok()
+            || std::thread::current().name().unwrap_or("main").contains("test")
+            || std::env::args().skip(1).any(|arg| arg.contains("test"));
+
         let base_dir = match crate::config::load_bootstrap_config().storage_dir {
             Some(dir_str) if !dir_str.is_empty() => std::path::PathBuf::from(&dir_str),
-            _ => std::env::current_dir().unwrap_or_default(),
+            _ => {
+                if is_test {
+                    let thread_name = std::thread::current().name().unwrap_or("main").to_string();
+                    let safe_name = thread_name.chars()
+                        .filter(|c| c.is_alphanumeric() || *c == '_' || *c == ':')
+                        .map(|c| if c == ':' { '_' } else { c })
+                        .collect::<String>();
+                    std::env::temp_dir().join(format!("vibepilot_test_{}", safe_name))
+                } else {
+                    std::env::current_dir().unwrap_or_default()
+                }
+            }
         };
         let custom_dir_str = base_dir.to_string_lossy().to_string();
 
@@ -132,6 +173,7 @@ impl VibePilotApp {
 
         let mut app = Self {
             structured_steps: Vec::new(),
+            action_textures: std::collections::HashMap::new(),
             config_repo,
             action_logger,
             bus: bus.clone(),
@@ -181,6 +223,27 @@ impl VibePilotApp {
 
             lexicon_fr: crate::content::lexicon_fr(),
             lexicon_en: crate::content::lexicon_en(),
+
+            macro_recorder: crate::macro_recorder::MacroRecorderFactory::create(),
+            macro_sequence: crate::macro_recorder::MacroSequence::new("Run #1"),
+            macro_session_manager: crate::macro_recorder::MacroSessionManager::new(),
+            macro_hotkey_config: crate::macro_recorder::HotkeyConfig::default(),
+            macro_iterations: 1,
+            macro_start_delay_sec: 0,
+            macro_record_start_delay_sec: 0,
+            macro_countdown_remaining: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            macro_recording_countdown_remaining: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            macro_active_playback_step: std::sync::Arc::new(std::sync::Mutex::new(None)),
+            is_playing_macro: false,
+            macro_playback_cancel: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            selected_macro_node: None,
+            macro_undo_stack: Vec::new(),
+            macro_redo_stack: Vec::new(),
+            was_recording_macro: false,
+            node_binding_capture: None,
+            show_macro_save_confirm: false,
+            macro_script_text: String::new(),
+            macro_view_mode_text: false,
         };
 
         app.current_config = app.config_repo.load_config();
@@ -193,8 +256,7 @@ impl VibePilotApp {
 
         let last_profile = app.current_config.dernier_profil.clone();
         if !last_profile.is_empty() && app.config_repo.list_profiles().contains(&last_profile) {
-            app.selected_profile = last_profile.clone();
-            app.quick_start_profile_name = last_profile;
+            app.load_profile(&last_profile);
         } else {
             app.selected_profile = app.get_first_available_profile_name();
             app.quick_start_profile_name = app.get_first_available_profile_name();
@@ -202,6 +264,26 @@ impl VibePilotApp {
 
         if let Some(zoom) = app.current_config.zoom_facteur {
             egui_ctx.set_pixels_per_point(zoom);
+        }
+
+        let sessions_path = app.config_repo.get_save_path().parent().unwrap_or(std::path::Path::new(".")).join("macro_sessions.json");
+        if let Ok(loaded_sessions) = crate::macro_recorder::storage::MacroStorage::load_sessions(&sessions_path) {
+            if !loaded_sessions.runs.is_empty() {
+                app.macro_session_manager = loaded_sessions;
+                if let Some(r) = app.macro_session_manager.active_run() {
+                    app.macro_sequence = r.sequence.clone();
+                    app.macro_recorder.set_sequence(app.macro_sequence.clone());
+                    app.macro_iterations = r.iterations;
+                    app.macro_start_delay_sec = r.start_delay_sec;
+                    app.macro_record_start_delay_sec = r.record_start_delay_sec;
+                }
+            }
+        }
+
+        let hotkeys_path = app.config_repo.get_save_path().parent().unwrap_or(std::path::Path::new(".")).join("macro_hotkeys.json");
+        if let Ok(loaded_hotkeys) = crate::macro_recorder::storage::MacroStorage::load_hotkeys(&hotkeys_path) {
+            app.macro_hotkey_config = loaded_hotkeys.clone();
+            app.macro_recorder.set_hotkeys(loaded_hotkeys);
         }
 
         bus.register_query(
@@ -323,8 +405,9 @@ impl VibePilotApp {
         if let Some(mut cfg) = self.config_repo.load_profile(name) {
             self.stop_orchestrator();
             self.action_history.clear();
-            self.logs.clear();
             self.structured_steps.clear();
+            self.action_textures.clear();
+            self.logs.clear();
             self.report_content.clear();
             self.user_feedback_input.clear();
             if let Ok(mut guard) = self.accumulated_user_feedback.lock() {
@@ -349,14 +432,84 @@ impl VibePilotApp {
     }
 
     pub fn get_first_available_profile_name(&self) -> String {
-        let existing_profiles = self.config_repo.list_profiles();
-        for i in 1..=9995 {
+        use std::collections::HashSet;
+        let existing_profiles: HashSet<String> = self.config_repo.list_profiles().into_iter().collect();
+        let mut i = 1;
+        loop {
             let name = format!("profile_{:02}", i);
             if !existing_profiles.contains(&name) {
                 return name;
             }
+            i += 1;
         }
-        "profile_9995".to_string()
+    }
+
+    pub fn is_profile_modified(&self) -> bool {
+        if let Some(saved) = self.config_repo.load_profile(&self.selected_profile) {
+            let mut c1 = self.current_config.clone();
+            let mut c2 = saved;
+            c1.dernier_profil = String::new();
+            c2.dernier_profil = String::new();
+            c1.prompt_reprise = None;
+            c2.prompt_reprise = None;
+            c1 != c2
+        } else {
+            !self.selected_profile.is_empty()
+        }
+    }
+
+    pub fn push_macro_undo(&mut self) {
+        self.macro_undo_stack.push(self.macro_sequence.clone());
+        if self.macro_undo_stack.len() > 50 {
+            self.macro_undo_stack.remove(0);
+        }
+        self.macro_redo_stack.clear();
+    }
+
+    pub fn undo_macro_action(&mut self) -> bool {
+        if let Some(prev) = self.macro_undo_stack.pop() {
+            self.macro_redo_stack.push(self.macro_sequence.clone());
+            self.macro_sequence = prev.clone();
+            if let Some(run) = self.macro_session_manager.active_run_mut() {
+                run.sequence = prev.clone();
+            }
+            self.macro_recorder.set_sequence(prev);
+            self.save_macro_sessions_now();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn redo_macro_action(&mut self) -> bool {
+        if let Some(next) = self.macro_redo_stack.pop() {
+            self.macro_undo_stack.push(self.macro_sequence.clone());
+            self.macro_sequence = next.clone();
+            if let Some(run) = self.macro_session_manager.active_run_mut() {
+                run.sequence = next.clone();
+            }
+            self.macro_recorder.set_sequence(next);
+            self.save_macro_sessions_now();
+            true
+        } else {
+            false
+        }
+    }
+
+    pub fn save_macro_sessions_now(&mut self) {
+        if let Some(run) = self.macro_session_manager.active_run_mut() {
+            run.sequence = self.macro_sequence.clone();
+            run.iterations = self.macro_iterations;
+            run.start_delay_sec = self.macro_start_delay_sec;
+            run.record_start_delay_sec = self.macro_record_start_delay_sec;
+        }
+        let rec_hotkeys = self.macro_recorder.get_hotkeys();
+        if rec_hotkeys != crate::macro_recorder::HotkeyConfig::default() {
+            self.macro_hotkey_config = rec_hotkeys;
+        }
+        let dir = self.config_repo.get_save_path().parent().unwrap_or(std::path::Path::new(".")).to_path_buf();
+        let _ = crate::macro_recorder::storage::MacroStorage::save_sessions(&self.macro_session_manager, dir.join("macro_sessions.json"));
+        let _ = crate::macro_recorder::storage::MacroStorage::save_hotkeys(&self.macro_hotkey_config, dir.join("macro_hotkeys.json"));
     }
 }
 
@@ -369,5 +522,9 @@ impl eframe::App for VibePilotApp {
             self.last_saved_config = self.current_config.clone();
         }
         ctx.request_repaint_after(std::time::Duration::from_millis(250));
+    }
+
+    fn on_exit(&mut self, _gl: Option<&eframe::glow::Context>) {
+        self.save_macro_sessions_now();
     }
 }

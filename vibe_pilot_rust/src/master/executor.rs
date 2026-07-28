@@ -253,13 +253,20 @@ mod tests {
         let rt = tokio::runtime::Handle::current();
         executor.start_execution(&rt);
 
-        // Wait for executor execution to complete
-        tokio::time::sleep(tokio::time::Duration::from_millis(400)).await;
+        // Wait for executor execution to complete (with polling and timeout)
+        let start = std::time::Instant::now();
+        let mut final_state = NodeState::Pending;
+        while start.elapsed() < std::time::Duration::from_secs(3) {
+            final_state = {
+                let g = shared_graph.lock().unwrap();
+                g.nodes.get("node1").unwrap().state
+            };
+            if final_state == NodeState::Success || final_state == NodeState::Failed {
+                break;
+            }
+            tokio::time::sleep(tokio::time::Duration::from_millis(50)).await;
+        }
 
-        let final_state = {
-            let g = shared_graph.lock().unwrap();
-            g.nodes.get("node1").unwrap().state
-        };
         assert_eq!(final_state, NodeState::Success);
     }
 }

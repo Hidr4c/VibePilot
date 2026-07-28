@@ -2,11 +2,8 @@ use crate::app::VibePilotApp;
 use crate::event_bus::NotificationEvent;
 use eframe::egui;
 
-fn is_profile_modified(app: &VibePilotApp) -> bool {
-    app.current_config.contexte != app.last_saved_config.contexte
-        || app.current_config.objectif != app.last_saved_config.objectif
-        || app.current_config.task != app.last_saved_config.task
-        || app.current_config.directives != app.last_saved_config.directives
+pub fn is_profile_modified(app: &VibePilotApp) -> bool {
+    app.is_profile_modified()
 }
 
 fn render_editor_profile_manager(ui: &mut egui::Ui, app: &mut VibePilotApp) {
@@ -185,12 +182,17 @@ pub fn render_prompt_editor_tab(ui: &mut egui::Ui, app: &mut VibePilotApp) {
     });
     ui.add_space(12.0);
 
-    // Bottom buttons inside tab: Save Profile
     ui.horizontal(|ui| {
         if ui.add(egui::Button::new(egui::RichText::new(app.t("btn_sauver")).color(egui::Color32::WHITE).strong()).fill(egui::Color32::from_rgb(20, 120, 100))).on_hover_text(app.t("tip_save_profile")).clicked() {
             app.config_repo.save_config(&app.current_config);
-            app.bus.emit_notification(NotificationEvent::Log("Configuration saved".to_string()));
-            app.show_save_success_popup = Some("config".to_string());
+            if !app.selected_profile.is_empty() {
+                app.current_config.dernier_profil = app.selected_profile.clone();
+                if app.config_repo.save_profile(&app.selected_profile, &app.current_config) {
+                    app.last_saved_config = app.current_config.clone();
+                }
+            }
+            app.bus.emit_notification(NotificationEvent::Log("Configuration and profile saved".to_string()));
+            app.show_save_success_popup = Some(if app.selected_profile.is_empty() { "config".to_string() } else { app.selected_profile.clone() });
         }
     });
 }

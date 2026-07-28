@@ -180,9 +180,15 @@ impl VibePilotOrchestrator {
 
     /// Checks if the orchestrator has running status enabled.
     pub fn is_running(&self) -> bool {
+        let bus_running = self.bus.emit_query(QueryEvent::GetOrchestratorRunning);
+        if bus_running == "false" {
+            return false;
+        }
+        if bus_running == "true" {
+            return true;
+        }
         let current = self.state.lock().unwrap().clone();
-        !matches!(current, OrchestratorState::Idle) ||
-        self.bus.emit_query(QueryEvent::GetOrchestratorRunning) == "true"
+        !matches!(current, OrchestratorState::Idle)
     }
 
     /// Sets pause mode (for testing/configuration).

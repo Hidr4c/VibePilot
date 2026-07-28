@@ -9,6 +9,10 @@ use crate::commands::Command;
 impl VibePilotOrchestrator {
     /// Handles an LLM decision and executes the corresponding action.
     pub(crate) async fn handle_decision(&self, res: LlmResponse) -> Result<(), String> {
+        if self.bus.emit_query(crate::event_bus::QueryEvent::GetOrchestratorRunning) == "false" {
+            return Ok(());
+        }
+
         self.bus.emit_notification(NotificationEvent::UpdateStatus {
             text: res.status_display.clone(),
             color: "green".to_string(),
@@ -39,7 +43,7 @@ impl VibePilotOrchestrator {
             },
             "FAIL" => {
                 self.bus.emit_notification(NotificationEvent::Log("LLM reported failure.".to_string()));
-                sleep(Duration::from_secs(res.wait_seconds as u64)).await;
+                self.cancelable_sleep(Duration::from_secs(res.wait_seconds as u64)).await;
             },
             "CLICK_AND_TYPE" => {
                 self.bus.emit_notification(NotificationEvent::AppendAction {
@@ -101,12 +105,12 @@ impl VibePilotOrchestrator {
                     *t = std::time::Instant::now();
                 }
                 self.controller.execute_action(&payload, &offsets, config.verifier_placement_souris);
-                sleep(Duration::from_secs(res.wait_seconds as u64)).await;
+                self.cancelable_sleep(Duration::from_secs(res.wait_seconds as u64)).await;
             },
             "SCROLL" => {
                 self.bus.emit_notification(NotificationEvent::AppendAction {
                     action: "Scroll".to_string(),
-                    display: format!("Value: {} Mode: {}", res.scroll_value, res.scroll_mode),
+                    display: format!("Value: {} Mode: {} Dir: {}", res.scroll_value, res.scroll_mode, res.scroll_direction),
                 });
                 self.wait_if_user_active().await;
 
@@ -114,16 +118,32 @@ impl VibePilotOrchestrator {
                     *t = std::time::Instant::now();
                 }
 
-                if res.scroll_mode == "quick" {
-                    let dir = if res.scroll_value > 0 { "up" } else { "down" };
-                    let intensity = if res.scroll_value.abs() > 20 { "high" } else { "medium" };
-                    let _ = self.controller.quick_scroll_vertical(dir, intensity);
-                } else if res.scroll_mode == "smooth" {
-                    let _ = self.controller.smooth_scroll_vertical(res.scroll_value, 10, 300);
+                let dir = res.scroll_direction.to_lowercase();
+                if dir == "left" || dir == "right" {
+                    let val = if dir == "left" {
+                        -res.scroll_value.abs()
+                    } else {
+                        res.scroll_value.abs()
+                    };
+                    let _ = self.controller.scroll_horizontal(val);
                 } else {
-                    let _ = self.controller.scroll_vertical(res.scroll_value);
+                    let mut val = res.scroll_value;
+                    if dir == "up" {
+                        val = res.scroll_value.abs();
+                    } else if dir == "down" {
+                        val = -res.scroll_value.abs();
+                    }
+                    if res.scroll_mode == "quick" {
+                        let quick_dir = if val > 0 { "up" } else { "down" };
+                        let intensity = if val.abs() > 20 { "high" } else { "medium" };
+                        let _ = self.controller.quick_scroll_vertical(quick_dir, intensity);
+                    } else if res.scroll_mode == "smooth" {
+                        let _ = self.controller.smooth_scroll_vertical(val, 10, 300);
+                    } else {
+                        let _ = self.controller.scroll_vertical(val);
+                    }
                 }
-                sleep(Duration::from_secs(res.wait_seconds as u64)).await;
+                self.cancelable_sleep(Duration::from_secs(res.wait_seconds as u64)).await;
             },
             "RIGHT_CLICK" => {
                 self.bus.emit_notification(NotificationEvent::AppendAction {
@@ -149,7 +169,7 @@ impl VibePilotOrchestrator {
                 }
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 let _ = self.controller.right_click();
-                sleep(Duration::from_secs(res.wait_seconds as u64)).await;
+                self.cancelable_sleep(Duration::from_secs(res.wait_seconds as u64)).await;
             },
             "DOUBLE_CLICK" => {
                 self.bus.emit_notification(NotificationEvent::AppendAction {
@@ -175,7 +195,7 @@ impl VibePilotOrchestrator {
                 }
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 let _ = self.controller.double_click();
-                sleep(Duration::from_secs(res.wait_seconds as u64)).await;
+                self.cancelable_sleep(Duration::from_secs(res.wait_seconds as u64)).await;
             },
             "MIDDLE_CLICK" => {
                 self.bus.emit_notification(NotificationEvent::AppendAction {
@@ -201,7 +221,7 @@ impl VibePilotOrchestrator {
                 }
                 std::thread::sleep(std::time::Duration::from_millis(100));
                 let _ = self.controller.middle_click();
-                sleep(Duration::from_secs(res.wait_seconds as u64)).await;
+                self.cancelable_sleep(Duration::from_secs(res.wait_seconds as u64)).await;
             },
             "MOUSE_MOVE_RELATIVE" => {
                 self.bus.emit_notification(NotificationEvent::AppendAction {
@@ -219,7 +239,65 @@ impl VibePilotOrchestrator {
                 let dx = (dx_rel * screen_w) as i32;
                 let dy = (dy_rel * screen_h) as i32;
                 let _ = self.controller.mouse_move_relative(dx, dy);
-                sleep(Duration::from_secs(res.wait_seconds as u64)).await;
+                self.cancelable_sleep(Duration::from_secs(res.wait_seconds as u64)).await;
+            },
+            "MACRO_SCRIPT" => {
+                self.bus.emit_notification(NotificationEvent::AppendAction {
+                    action: "Macro Script Protocol".to_string(),
+                    display: format!("Batch script ({} bytes)", res.macro_script.len()),
+                });
+                self.wait_if_user_active().await;
+                if let Ok(mut t) = self.last_simulated_input_time.lock() {
+                    *t = std::time::Instant::now();
+                }
+
+                if !res.macro_script.is_empty() {
+                    match crate::macro_recorder::script_parser::MacroScriptParser::from_script(&res.macro_script) {
+                        Ok((mut seq, iters_opt, start_opt, _rec_opt, rel_entries)) => {
+                            // Resolve relative coordinates (rx/ry) to absolute pixels
+                            // using the current target window/monitor offsets for multi-screen support.
+                            // For AI: the AI decides which screen based on its screenshot capture.
+                            // If no offsets are available, fall back to the focused screen.
+                            if !rel_entries.is_empty() {
+                                let effective_offsets = if offsets.is_empty() {
+                                    let focused = crate::macro_recorder::script_parser::MacroScriptParser::get_focused_screen_offset();
+                                    vec![focused]
+                                } else {
+                                    offsets.clone()
+                                };
+                                crate::macro_recorder::script_parser::MacroScriptParser::resolve_relative_coords(
+                                    &mut seq,
+                                    &rel_entries,
+                                    &effective_offsets,
+                                );
+                                self.bus.emit_notification(NotificationEvent::Log(format!(
+                                    "🖥️ Resolved {} relative coordinate(s) using target offsets [left={}, top={}, {}x{}]",
+                                    rel_entries.len(),
+                                    effective_offsets.first().map(|o| o.left).unwrap_or(0),
+                                    effective_offsets.first().map(|o| o.top).unwrap_or(0),
+                                    effective_offsets.first().map(|o| o.width).unwrap_or(1920),
+                                    effective_offsets.first().map(|o| o.height).unwrap_or(1080),
+                                )));
+                            }
+                            let iters = iters_opt.unwrap_or(1);
+                            let start_delay = start_opt.unwrap_or(0);
+                            let cancel_flag = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+                            let _ = crate::macro_recorder::player::MacroPlayer::play(
+                                seq,
+                                iters,
+                                start_delay,
+                                self.controller.clone(),
+                                cancel_flag,
+                                None,
+                                None,
+                            ).await;
+                        }
+                        Err(err) => {
+                            self.bus.emit_notification(NotificationEvent::Log(format!("⚠️ Failed to parse LLM Macro Script: {err}")));
+                        }
+                    }
+                }
+                self.cancelable_sleep(Duration::from_secs(res.wait_seconds as u64)).await;
             },
             "KEY_COMBO" => {
                 self.bus.emit_notification(NotificationEvent::AppendAction {
@@ -239,7 +317,7 @@ impl VibePilotOrchestrator {
                 if !rdev_keys.is_empty() {
                     let _ = self.controller.key_combo(&rdev_keys);
                 }
-                sleep(Duration::from_secs(res.wait_seconds as u64)).await;
+                self.cancelable_sleep(Duration::from_secs(res.wait_seconds as u64)).await;
             },
             "CLIPBOARD" => {
                 self.bus.emit_notification(NotificationEvent::AppendAction {
@@ -267,7 +345,7 @@ impl VibePilotOrchestrator {
                     }
                     _ => {}
                 }
-                sleep(Duration::from_secs(res.wait_seconds as u64)).await;
+                self.cancelable_sleep(Duration::from_secs(res.wait_seconds as u64)).await;
             },
             "DRAG_DROP" => {
                 self.bus.emit_notification(NotificationEvent::AppendAction {
@@ -285,7 +363,7 @@ impl VibePilotOrchestrator {
                 let (from_x, from_y) = self.controller.compute_absolute_coordinates(fx_rel, fy_rel, &offsets);
                 let (to_x, to_y) = self.controller.compute_absolute_coordinates(tx_rel, ty_rel, &offsets);
                 let _ = self.controller.drag_and_drop((from_x, from_y), (to_x, to_y), rdev::Button::Left);
-                sleep(Duration::from_secs(res.wait_seconds as u64)).await;
+                self.cancelable_sleep(Duration::from_secs(res.wait_seconds as u64)).await;
             },
             "WAIT" => {
                 let duration = res.duration_secs.unwrap_or(res.wait_seconds as u32);
@@ -345,7 +423,7 @@ impl VibePilotOrchestrator {
                 } else {
                     self.bus.emit_notification(NotificationEvent::Log(format!("⚠️ Unknown shortcut name: {}", res.shortcut_name)));
                 }
-                sleep(Duration::from_secs(res.wait_seconds as u64)).await;
+                self.cancelable_sleep(Duration::from_secs(res.wait_seconds as u64)).await;
             },
             "TYPE_WITH_DELAY" => {
                 self.bus.emit_notification(NotificationEvent::AppendAction {
@@ -366,12 +444,12 @@ impl VibePilotOrchestrator {
                 };
                 let mut ctx = crate::commands::ExecutionContext::new();
                 let _ = cmd.execute(&mut ctx).await;
-                sleep(Duration::from_secs(res.wait_seconds as u64)).await;
+                self.cancelable_sleep(Duration::from_secs(res.wait_seconds as u64)).await;
             },
             "SMOOTH_SCROLL" => {
                 self.bus.emit_notification(NotificationEvent::AppendAction {
                     action: "Smooth Scroll".to_string(),
-                    display: format!("delta: {} duration: {}ms", res.scroll_value, res.duration_ms),
+                    display: format!("delta: {} duration: {}ms Dir: {}", res.scroll_value, res.duration_ms, res.scroll_direction),
                 });
                 self.wait_if_user_active().await;
                 if let Ok(mut t) = self.last_simulated_input_time.lock() {
@@ -379,13 +457,29 @@ impl VibePilotOrchestrator {
                 }
                 let duration = if res.duration_ms == 0 { 300 } else { res.duration_ms };
                 
-                let cmd = crate::commands::MouseSmoothScrollCommand {
-                    delta_total: res.scroll_value,
-                    duration_ms: duration,
-                };
-                let mut ctx = crate::commands::ExecutionContext::new();
-                let _ = cmd.execute(&mut ctx).await;
-                sleep(Duration::from_secs(res.wait_seconds as u64)).await;
+                let dir = res.scroll_direction.to_lowercase();
+                if dir == "left" || dir == "right" {
+                    let val = if dir == "left" {
+                        -res.scroll_value.abs()
+                    } else {
+                        res.scroll_value.abs()
+                    };
+                    let _ = self.controller.scroll_horizontal(val);
+                } else {
+                    let mut val = res.scroll_value;
+                    if dir == "up" {
+                        val = res.scroll_value.abs();
+                    } else if dir == "down" {
+                        val = -res.scroll_value.abs();
+                    }
+                    let cmd = crate::commands::MouseSmoothScrollCommand {
+                        delta_total: val,
+                        duration_ms: duration,
+                    };
+                    let mut ctx = crate::commands::ExecutionContext::new();
+                    let _ = cmd.execute(&mut ctx).await;
+                }
+                self.cancelable_sleep(Duration::from_secs(res.wait_seconds as u64)).await;
             },
             "KEY_HOLD" => {
                 let key_str = res.keys_to_press.first().cloned().unwrap_or_else(|| res.text_to_type.clone());
@@ -404,7 +498,7 @@ impl VibePilotOrchestrator {
                 } else {
                     self.bus.emit_notification(NotificationEvent::Log(format!("⚠️ Cannot parse key for KeyHold: {}", key_str)));
                 }
-                sleep(Duration::from_secs(res.wait_seconds as u64)).await;
+                self.cancelable_sleep(Duration::from_secs(res.wait_seconds as u64)).await;
             },
             "KEY_RELEASE" => {
                 let key_str = res.keys_to_press.first().cloned().unwrap_or_else(|| res.text_to_type.clone());
@@ -423,7 +517,7 @@ impl VibePilotOrchestrator {
                 } else {
                     self.bus.emit_notification(NotificationEvent::Log(format!("⚠️ Cannot parse key for KeyRelease: {}", key_str)));
                 }
-                sleep(Duration::from_secs(res.wait_seconds as u64)).await;
+                self.cancelable_sleep(Duration::from_secs(res.wait_seconds as u64)).await;
             },
             _ => {
                 self.bus.emit_notification(NotificationEvent::Log(format!("Unknown action: {}", res.action)));

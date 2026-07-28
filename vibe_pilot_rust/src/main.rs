@@ -31,6 +31,7 @@ pub mod services;
 pub mod prompt_templates;
 pub mod ocr;
 pub mod vision;
+pub mod macro_recorder;
 
 
 use app::VibePilotApp;

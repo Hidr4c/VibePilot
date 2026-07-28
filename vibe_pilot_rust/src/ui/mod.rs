@@ -6,6 +6,7 @@ pub mod task_graph;
 pub mod console_timeline;
 pub mod engine_config;
 pub mod setup_import_export;
+pub mod macro_tab;
 
 
 #[cfg(test)]
@@ -21,6 +22,7 @@ use global_config::render_config_tab;
 use prompt_editor::render_prompt_editor_tab;
 use setup::render_setup_tab;
 use task_graph::render_task_graph_tab;
+use macro_tab::render_macro_recorder_tab;
 
 pub fn render_main_window(ctx: &egui::Context, app: &mut VibePilotApp) {
     // Apply dark theme if enabled
@@ -59,6 +61,7 @@ pub fn render_main_window(ctx: &egui::Context, app: &mut VibePilotApp) {
                 (Tab::PromptEditor, app.t("tab_prompts")),
                 (Tab::Console, app.t("tab_console")),
                 (Tab::TaskGraph, app.t("tab_task_graph")),
+                (Tab::MacroRecorder, "🔴 Macro Recorder".to_string()),
                 (Tab::Setup, app.t("tab_setup")),
             ];
             for (tab_type, tab_label) in tabs {
@@ -82,6 +85,7 @@ pub fn render_main_window(ctx: &egui::Context, app: &mut VibePilotApp) {
                         Tab::PromptEditor => render_prompt_editor_tab(ui, app),
                         Tab::Setup => render_setup_tab(ui, app),
                         Tab::TaskGraph => render_task_graph_tab(ui, app),
+                        Tab::MacroRecorder => render_macro_recorder_tab(ui, app),
                         _ => {}
                     }
                 });

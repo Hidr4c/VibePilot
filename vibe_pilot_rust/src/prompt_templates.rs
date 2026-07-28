@@ -119,7 +119,17 @@ pub fn execute_decision_prompt(
               1. DISMISS BLOCKING OVERLAYS: If an unexpected dialog box, confirmation window, modal popup, notification alert, or overlay menu is blocking your target workspace, your absolute priority is to close or dismiss it first. Look for 'X', close icons, 'Cancel', 'Fermer', 'OK', or click outside the popup. If no obvious close button is found, try sending KEY_COMBO [\"Escape\"].\n\
               2. BACKTRACK TO STABLE STATE: If you have navigated or drifted to an incorrect view or layout, do not continue trying to click elements of the expected view. You must actively backtrack to the last known correct state by using the appropriate undo action, clicking back buttons, using navigation shortcuts, or clicking a cancel/home command.\n\
               3. WAIT ON BUSY INTERFACES: If the application interface is loading, busy, or temporarily unresponsive, do not send repetitive clicks. Choose a 'WAIT' action to let the application stabilize.\n\
-              4. CALIBRATE COORDINATE DRIFTS: Check the red crosshair from your previous attempt. If it points slightly away from the target element, adjust your coordinates on the next attempt. Explain clearly in your \"report\" which recovery step you are executing (e.g., \"Divergence detected: dismissing overlay dialog first\").\n\n\
+              4. CALIBRATE COORDINATE DRIFTS: Check the red crosshair from your previous attempt. If it points slightly away from the target element, adjust your coordinates on the next attempt. Explain clearly in your \"report\" which recovery step you are executing (e.g., \"Divergence detected: dismissing overlay dialog first\").\n\
+           - GUI Scroll & Viewport Exploration Protocol:\n\
+              If the target application page is larger than the visible window or has scrollbars (horizontal or vertical):\n\
+              1. EXPLORE BEFORE CLICKING: If the elements you need to interact with are cut off, hidden, or partially visible, DO NOT try to click randomly. You MUST first execute a \"SCROLL\" action in the appropriate direction (\"down\" to see below, \"up\" to see above, \"right\" to see to the right, \"left\" to see to the left).\n\
+              2. PREFER SCROLLING OVER STUCK CLICKS: If your target element cannot be found or clicked, check if you need to scroll the page. Execute a \"SCROLL\" action with a scroll_direction of \"down\" or \"right\" and a scroll_value (e.g. -6 or -10 for down/left, 6 or 10 for up/right).\n\
+              3. CHOOSE CORRECT SCROLL DIRECTION: Always specify \"scroll_direction\" (\"up\", \"down\", \"left\", \"right\") and \"scroll_value\" accordingly.\n\
+           - GUI Dropdown & Precision Clicking Protocol:\n\
+              When clicking on dropdown menu items, submenus, bookmarks list items, or small icons:\n\
+              1. ALIGN WITH PARENT FOLDER: A dropdown list opened by a folder bookmark (like 'Animes') is aligned vertically below that folder. Do not click to the left or right of the folder's column.\n\
+              2. SUBMENU ITEMS HAVE LARGER Y COORDINATES: Items inside an expanded dropdown menu are situated BELOW the parent bookmark. Therefore, their Y coordinate MUST be significantly larger (e.g., if the parent folder is at y=0.05, the first item in the dropdown list will be at y=0.08, the second at y=0.11, etc.). Never predict the same Y coordinate as the bookmarks bar for dropdown items.\n\
+              3. CHECK DRIFT AND CALIBRATE: If a click on a folder bookmark lands on a neighboring icon instead, adjust the X coordinate horizontally on the next attempt.\n\
            - GUI Input Validation & Text Field Integrity Rules:\n\
               When entering text into search fields, input boxes, or form fields, adhere strictly to these validation and integrity rules:\n\
               1. TYPING IS NOT SUBMITTING: Merely typing text into an input field using \"CLICK_AND_TYPE\" does not submit it. If no visible validation or search button is present on the screen to click, you MUST explicitly trigger submission in your next step by executing a \"KEY_COMBO\" action with [\"Return\"] (Enter key).\n\
@@ -140,6 +150,7 @@ pub fn execute_decision_prompt(
              * \"DOUBLE_CLICK\": perform mouse double-click\n\
              * \"MIDDLE_CLICK\": perform mouse middle-click\n\
              * \"MOUSE_MOVE_RELATIVE\": move mouse relatively by delta dx/dy\n\
+             * \"MACRO_SCRIPT\": execute a multi-step macro script protocol batch (e.g. key combo, mouse click, sleep wait, typing) in a single turn without waiting for screenshot turns\n\
            - \"relative_click_position\": [x, y] coordinates (float 0.0 to 1.0) relative to screen/target area, or [0.0, 0.0]\n\
            - \"text_to_type\": string to write/paste after click, or empty\n\
            - \"scroll_value\": positive integer to scroll up, negative to scroll down, or 0\n\
@@ -152,9 +163,10 @@ pub fn execute_decision_prompt(
            - \"clipboard_op\": \"copy\", \"paste\", \"cut\", \"select_all\", or \"get_text\"\n\
            - \"drag_from\": [x, y] start coordinates for DRAG_DROP\n\
            - \"drag_to\": [x, y] destination coordinates for DRAG_DROP\n\
-            - \"relative_move\": [dx, dy] deltas for MOUSE_MOVE_RELATIVE (floats representing fractional movement relative to screen width/height, e.g. [0.05, -0.02])\n\
-            - \"confidence\": a float between 0.0 and 1.0 indicating your certainty about the accuracy of the coordinates. 1.0 = absolutely certain, 0.0 = completely uncertain. You MUST provide this field.\n\
-            - \"report\": a mandatory detailed analysis report containing your visual calibration steps and logic.\n\n\
+           - \"relative_move\": [dx, dy] deltas for MOUSE_MOVE_RELATIVE (floats representing fractional movement relative to screen width/height, e.g. [0.05, -0.02])\n\
+           - \"macro_script\": multi-line text script in VibePilot Macro Protocol. IMPORTANT for multi-screen support: use relative coordinates rx/ry (floats 0.0-1.0, same as relative_click_position) instead of absolute pixel x/y for mouse actions. The system will resolve them to the correct absolute coordinates on the target screen/window. Example: \"CLICK rx=0.5 ry=0.3 delay=200\\nKEYPRESS key=Return delay=150\\nSLEEP ms=500\\nKEYCOMBO keys=Ctrl,C delay=150\". Supported commands: CLICK (rx/ry or x/y), MOUSEDOWN, MOUSEUP, MOVE, DRAG (from_rx/from_ry/to_rx/to_ry), KEYPRESS, KEYHOLD, KEYCOMBO, SCROLL, SLEEP ms=N (or WAIT ms=N).\n\
+           - \"confidence\": a float between 0.0 and 1.0 indicating your certainty about the accuracy of the coordinates. 1.0 = absolutely certain, 0.0 = completely uncertain. You MUST provide this field.\n\
+           - \"report\": a mandatory detailed analysis report containing your visual calibration steps and logic.\n\n\
             Let's proceed.\n\n\
             JSON response:",
         contexte, objectif, task, directives, feedback_prompt

@@ -65,14 +65,13 @@ pub fn render_setup_tab(ui: &mut egui::Ui, app: &mut VibePilotApp) {
         ui.label(egui::RichText::new("Preferences & Theme").strong());
         ui.separator();
 
-        let son = app.current_config.activer_son;
+                let son = app.current_config.activer_son;
         let tooltips = app.current_config.activer_tooltips;
         let auto_val = app.current_config.auto_validate;
         let auto_val_dang = app.current_config.auto_validate_dangerous;
         let theme = app.current_config.theme_sombre;
         let langue = app.current_config.langue.clone();
         let verify_cursor = app.current_config.verifier_placement_souris;
-        let detect_activity = app.current_config.detecter_activite_utilisateur;
         let ssd_savings = app.current_config.economie_ecriture_ssd;
         let keep_screen_awake = app.current_config.garder_ecran_actif;
         let capture_folder = app.current_config.dossier_sauvegarde_captures.clone().unwrap_or_default();
@@ -85,7 +84,6 @@ pub fn render_setup_tab(ui: &mut egui::Ui, app: &mut VibePilotApp) {
         let mut c_theme = theme;
         let mut c_langue = langue.clone();
         let mut c_verify_cursor = verify_cursor;
-        let mut c_detect_activity = detect_activity;
         let mut c_ssd_savings = ssd_savings;
         let mut c_keep_screen_active = keep_screen_awake;
         let mut c_capture_folder = capture_folder;
@@ -103,8 +101,6 @@ pub fn render_setup_tab(ui: &mut egui::Ui, app: &mut VibePilotApp) {
             ui.checkbox(&mut c_auto_val_dang, "Auto-validate Dangerous Commands");
             ui.add_space(4.0);
             ui.checkbox(&mut c_verify_cursor, app.t("chk_verify_cursor"));
-            ui.add_space(4.0);
-            ui.checkbox(&mut c_detect_activity, app.t("chk_detect_activity"));
             ui.add_space(4.0);
             ui.checkbox(&mut c_ssd_savings, app.t("chk_ssd_savings"));
             ui.add_space(4.0);
@@ -223,7 +219,6 @@ pub fn render_setup_tab(ui: &mut egui::Ui, app: &mut VibePilotApp) {
                 app.current_config.auto_validate = c_auto_val;
                 app.current_config.auto_validate_dangerous = c_auto_val_dang;
                 app.current_config.verifier_placement_souris = c_verify_cursor;
-                app.current_config.detecter_activite_utilisateur = c_detect_activity;
                 app.current_config.economie_ecriture_ssd = c_ssd_savings;
                 app.current_config.dossier_sauvegarde_captures = if c_capture_folder.trim().is_empty() {
                     None
@@ -248,7 +243,6 @@ pub fn render_setup_tab(ui: &mut egui::Ui, app: &mut VibePilotApp) {
         app.current_config.auto_validate = c_auto_val;
         app.current_config.auto_validate_dangerous = c_auto_val_dang;
         app.current_config.verifier_placement_souris = c_verify_cursor;
-        app.current_config.detecter_activite_utilisateur = c_detect_activity;
         app.current_config.economie_ecriture_ssd = c_ssd_savings;
         app.current_config.garder_ecran_actif = c_keep_screen_active;
         app.current_config.theme_sombre = c_theme;

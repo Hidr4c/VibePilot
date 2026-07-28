@@ -33,8 +33,8 @@ pub fn win32_move_mouse_absolute(x: i32, y: i32) {
         let virtual_height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
 
         if virtual_width > 0 && virtual_height > 0 {
-            let norm_x = ((x - min_x) * 65536) / virtual_width;
-            let norm_y = ((y - min_y) * 65536) / virtual_height;
+            let norm_x = ((x - min_x) * 65535) / virtual_width;
+            let norm_y = ((y - min_y) * 65535) / virtual_height;
 
             let mut input = INPUT::default();
             input.r#type = INPUT_MOUSE;
@@ -140,6 +140,83 @@ pub fn win32_middle_click_current_position() {
             time: 0, dwExtraInfo: 0,
         };
         SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+    }
+}
+
+#[cfg(target_os = "windows")]
+#[cfg_attr(tarpaulin, skip)]
+pub fn win32_type_text(text: &str) {
+    if cfg!(test) {
+        return;
+    }
+    use windows::Win32::UI::Input::KeyboardAndMouse::{
+        SendInput, INPUT, INPUT_KEYBOARD, KEYEVENTF_KEYUP, KEYEVENTF_UNICODE, KEYBDINPUT,
+    };
+
+    for ch in text.chars() {
+        let mut utf16_buf = [0u16; 2];
+        let encoded = ch.encode_utf16(&mut utf16_buf);
+        for &code_unit in encoded.iter() {
+            unsafe {
+                let mut inputs = [INPUT::default(), INPUT::default()];
+                inputs[0].r#type = INPUT_KEYBOARD;
+                inputs[0].Anonymous.ki = KEYBDINPUT {
+                    wVk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY(0),
+                    wScan: code_unit,
+                    dwFlags: KEYEVENTF_UNICODE,
+                    time: 0,
+                    dwExtraInfo: 0,
+                };
+
+                inputs[1].r#type = INPUT_KEYBOARD;
+                inputs[1].Anonymous.ki = KEYBDINPUT {
+                    wVk: windows::Win32::UI::Input::KeyboardAndMouse::VIRTUAL_KEY(0),
+                    wScan: code_unit,
+                    dwFlags: KEYEVENTF_UNICODE | KEYEVENTF_KEYUP,
+                    time: 0,
+                    dwExtraInfo: 0,
+                };
+
+                SendInput(&inputs, std::mem::size_of::<INPUT>() as i32);
+            }
+        }
+    }
+}
+
+/// Returns the bounds (left, top, width, height) of the monitor that contains the
+/// currently focused (foreground) window. Falls back to the primary monitor if
+/// no foreground window is found.
+///
+/// This is used by the macro recorder to determine which screen is "active"
+/// so that relative coordinate scripts resolve to the correct monitor position
+/// on multi-screen setups.
+#[cfg(target_os = "windows")]
+#[cfg_attr(tarpaulin, skip)]
+pub fn win32_get_focused_screen_bounds() -> (i32, i32, i32, i32) {
+    use crate::screen_capture::DpiAwarenessScope;
+    use windows::Win32::UI::WindowsAndMessaging::GetForegroundWindow;
+    use windows::Win32::Graphics::Gdi::{
+        MonitorFromWindow, GetMonitorInfoW, MONITORINFO, MONITOR_DEFAULTTOPRIMARY,
+    };
+
+    unsafe {
+        let _scope = DpiAwarenessScope::enter_per_monitor_v2();
+        let hwnd = GetForegroundWindow();
+        let hmonitor = MonitorFromWindow(hwnd, MONITOR_DEFAULTTOPRIMARY);
+
+        let mut mi = MONITORINFO::default();
+        mi.cbSize = std::mem::size_of::<MONITORINFO>() as u32;
+
+        if GetMonitorInfoW(hmonitor, &mut mi).as_bool() {
+            let rc = mi.rcMonitor;
+            (rc.left, rc.top, rc.right - rc.left, rc.bottom - rc.top)
+        } else {
+            // Fallback to primary monitor via GetSystemMetrics
+            use windows::Win32::UI::WindowsAndMessaging::{
+                GetSystemMetrics, SM_CXSCREEN, SM_CYSCREEN,
+            };
+            (0, 0, GetSystemMetrics(SM_CXSCREEN), GetSystemMetrics(SM_CYSCREEN))
+        }
     }
 }
 

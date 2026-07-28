@@ -1,4 +1,4 @@
-﻿use std::path::PathBuf;
+use std::path::PathBuf;
 use std::fs;
 use crate::memory::TaskGraph;
 use super::models::{PersistentState, SavedConfig, EnginePresets};
@@ -135,6 +135,7 @@ impl ConfigManagement for ConfigRepository {
         });
         let interval_secs = if config.economie_ecriture_ssd { 300 } else { 30 };
         self.store.set_interval(std::time::Duration::from_secs(interval_secs));
+        let _ = self.save_now();
     }
 
     fn save_now(&self) -> Result<(), String> {
@@ -159,6 +160,7 @@ impl ProfileManagement for ConfigRepository {
         self.store.update(|state| {
             state.profiles.insert(name.to_string(), config.clone());
         });
+        let _ = self.save_now();
         true
     }
 

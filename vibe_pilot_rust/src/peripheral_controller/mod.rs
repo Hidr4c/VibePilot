@@ -25,6 +25,7 @@ pub use native_win::{
     win32_click_current_position,
     win32_right_click_current_position,
     win32_middle_click_current_position,
+    win32_get_focused_screen_bounds,
 };
 
 // === Interface Segregation: Focused Sub-Traits ===

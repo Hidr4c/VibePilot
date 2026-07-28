@@ -3,6 +3,7 @@ use crate::event_bus::EventBus;
 use crate::orchestrator::VibePilotOrchestrator;
 use crate::llm_client::LlmResponse;
 use crate::config::{SavedConfig, StateManagement};
+use crate::peripheral_controller::CoordinateMapping;
 use super::{MockConfigRepo, MockLlmClient, MockScreenCapturer, MockPeripheralController, MockWaitManager};
 
 #[tokio::test]
@@ -348,14 +349,14 @@ async fn test_orchestrator_coordinate_normalization() {
         actions: std::sync::Mutex::new(vec![]),
     });
 
-    let orchestrator = VibePilotOrchestrator::new(
+    let orchestrator = Arc::new(VibePilotOrchestrator::new(
         config_repo.clone(),
         llm_client.clone(),
         capturer.clone(),
         controller.clone(),
         Arc::new(MockWaitManager),
         bus.clone(),
-    );
+    ));
 
     // Manually configure active_workspace_offsets to mimic Brave window size: [left=-609, top=1694, width=1872, height=1589]
     {
@@ -370,8 +371,9 @@ async fn test_orchestrator_coordinate_normalization() {
         });
     }
 
+    let orchestrator_clone = orchestrator.clone();
     let handle = tokio::spawn(async move {
-        orchestrator.run_loop().await
+        orchestrator_clone.run_loop().await
     });
 
     // Advance loop in virtual time so two iterations run
@@ -381,16 +383,39 @@ async fn test_orchestrator_coordinate_normalization() {
 
     // Stop orchestrator
     running.store(false, std::sync::atomic::Ordering::Relaxed);
+    *orchestrator.state.lock().unwrap() = crate::orchestrator::OrchestratorState::Idle;
+    loop {
+        tokio::time::advance(std::time::Duration::from_millis(100)).await;
+        tokio::task::yield_now().await;
+        if handle.is_finished() {
+            break;
+        }
+    }
     let _ = handle.await;
 
     let actions = controller.actions.lock().unwrap();
     println!("Executed actions list in test: {:?}", *actions);
 
-    // Verify that the action was executed, and that its coordinates were normalized.
-    // Normalized y = 79.0 / 1080.0 = 0.073... (rounds to 0.073)
+    // Verify that the action was executed, and that its coordinates were NOT clamped or prematurely normalized in process_llm_decision.
+    // Instead they should be passed down to execute_action as is.
     assert!(!actions.is_empty(), "Actions should not be empty");
-    let has_normalized = actions.iter().any(|act| act.contains("CLICK_AND_TYPE at 0.180, 0.073"));
-    assert!(has_normalized, "Should normalize out-of-bounds coordinates to [0.0, 1.0] range");
+    let has_raw = actions.iter().any(|act| act.contains("CLICK_AND_TYPE at 0.180, 79.000"));
+    assert!(has_raw, "Should pass raw pixel coordinates down to execute_action");
+
+    // Verify that the real compute_absolute_coordinates maps these coordinates correctly.
+    let real_capturer = Arc::new(crate::screen_capture::MockScreenCapturer::new());
+    let real_controller = crate::peripheral_controller::concrete::PeripheralController::new(real_capturer);
+    let test_offsets = vec![crate::peripheral_controller::ScreenOffset {
+        titre: "Brave".to_string(),
+        left: -609,
+        top: 1694,
+        width: 1872,
+        height: 1589,
+        y_offset: 1694,
+    }];
+    let (abs_x, abs_y) = real_controller.compute_absolute_coordinates(0.180, 79.000, &test_offsets);
+    assert_eq!(abs_x, -273);
+    assert_eq!(abs_y, 1773);
 }
 
 #[tokio::test]

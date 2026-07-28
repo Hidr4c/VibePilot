@@ -1,5 +1,7 @@
 /target/
-*.enc
+*.enc*
 *.log
-*.corrupt
-*.bak
+*.corrupt*
+*.bak*
+macro_hotkeys.json
+macro_sessions.json

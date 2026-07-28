@@ -14,6 +14,7 @@ impl VibePilotOrchestrator {
     /// - Maximum iterations: 1000
     /// - Maximum session duration: 1 hour
     pub async fn run_loop(&self) -> Result<(), String> {
+        self.replay_manager.clear_full_session();
         *self.state.lock().unwrap() = OrchestratorState::Running;
         struct StateGuard<'a> {
             state: &'a std::sync::Arc<std::sync::Mutex<OrchestratorState>>,
@@ -78,8 +79,12 @@ impl VibePilotOrchestrator {
                 if task_graph.is_none() || obj_changed {
                     last_objectif = config.objectif.clone();
                     task_graph = self.initialize_task_graph(&config).await;
+                    self.config_repo.save_task_graph(task_graph.clone());
                 }
             } else {
+                if self.config_repo.load_task_graph().is_some() {
+                    self.config_repo.save_task_graph(None);
+                }
                 task_graph = None; // Reset if disabled
             }
 
@@ -93,8 +98,10 @@ impl VibePilotOrchestrator {
             let mut active_task_id: Option<TaskId> = None;
             if let Some(ref mut graph) = task_graph {
                 if !self.select_active_task(graph, &mut active_task_id) {
+                    self.config_repo.save_task_graph(task_graph.clone());
                     break;
                 }
+                self.config_repo.save_task_graph(task_graph.clone());
             }
 
             if active_task_id != last_active_task_id {
@@ -111,7 +118,7 @@ impl VibePilotOrchestrator {
                     text: "PAUSED".to_string(),
                     color: "red".to_string(),
                 });
-                sleep(Duration::from_secs(1)).await;
+                self.cancelable_sleep(Duration::from_secs(1)).await;
                 continue;
             } else {
                 let mut s = self.state.lock().unwrap();
@@ -128,7 +135,7 @@ impl VibePilotOrchestrator {
                         text: "Waiting for target window...".to_string(),
                         color: "orange".to_string(),
                     });
-                    sleep(Duration::from_secs(2)).await;
+                    self.cancelable_sleep(Duration::from_secs(2)).await;
                     continue;
                 }
             }
@@ -149,7 +156,7 @@ impl VibePilotOrchestrator {
                             text: format!("GPU busy ({}%)...", gpu_usage),
                             color: "blue".to_string(),
                         });
-                        sleep(Duration::from_secs(2)).await;
+                        self.cancelable_sleep(Duration::from_secs(2)).await;
                         continue;
                     }
                 }
@@ -180,10 +187,37 @@ impl VibePilotOrchestrator {
             }
             if let Some(target) = offsets.first() {
                 if config.activer_recadrage_workspace && !escalate_to_desktop {
-                    self.bus.emit_notification(NotificationEvent::Log(format!(
-                        "⚙️ Active Workspace: resolving capture area to '{}' [x={}, y={}, w={}, h={}]",
-                        target.titre, target.left, target.top, target.width, target.height
-                    )));
+                    if !config.fenetres_surveillees.is_empty() {
+                        let expected = &config.fenetres_surveillees[0];
+                        if target.titre == "Full Desktop" && expected != "Full Desktop" && !expected.is_empty() {
+                            let msg = if config.langue == "Français" {
+                                format!("⚠️ Attention : La fenêtre ciblée '{}' est introuvable ou minimisée. Repli sur 'Full Desktop' !", expected)
+                            } else {
+                                format!("⚠️ Warning: Monitored window '{}' could not be found or is minimized. Falling back to 'Full Desktop'!", expected)
+                            };
+                            self.bus.emit_notification(NotificationEvent::Log(msg));
+                        } else {
+                            self.bus.emit_notification(NotificationEvent::Log(format!(
+                                "⚙️ Active Workspace: resolving capture area to '{}' [x={}, y={}, w={}, h={}]",
+                                target.titre, target.left, target.top, target.width, target.height
+                            )));
+                        }
+                    } else {
+                        self.bus.emit_notification(NotificationEvent::Log(format!(
+                            "⚙️ Active Workspace: resolving capture area to '{}' [x={}, y={}, w={}, h={}]",
+                            target.titre, target.left, target.top, target.width, target.height
+                        )));
+                    }
+                } else if !config.activer_recadrage_workspace && !config.fenetres_surveillees.is_empty() {
+                    let expected = &config.fenetres_surveillees[0];
+                    if expected != "Full Desktop" && !expected.is_empty() {
+                        let msg = if config.langue == "Français" {
+                            format!("⚠️ Attention : La fenêtre ciblée '{}' est sélectionnée, mais l'option « Recadrage Workspace » est désactivée dans vos paramètres ! Capture de tout l'écran par défaut.", expected)
+                        } else {
+                            format!("⚠️ Warning: Monitored window '{}' is selected, but 'Workspace Cropping' is disabled in your settings! Capturing Full Desktop instead.", expected)
+                        };
+                        self.bus.emit_notification(NotificationEvent::Log(msg));
+                    }
                 }
             }
 
@@ -278,6 +312,9 @@ impl VibePilotOrchestrator {
                     && !config.fenetres_surveillees.is_empty()
                     && !self.controller.is_desktop_title(&config.fenetres_surveillees[0]);
 
+                if self.bus.emit_query(crate::event_bus::QueryEvent::GetOrchestratorRunning) == "false" {
+                    break;
+                }
                 let response = self.get_llm_decision(
                     &config,
                     &img,
@@ -313,6 +350,9 @@ impl VibePilotOrchestrator {
 
                 last_captured_image = Some(img.clone());
 
+                if self.bus.emit_query(crate::event_bus::QueryEvent::GetOrchestratorRunning) == "false" {
+                    break;
+                }
                 match response {
                     Ok(res) => {
                         match self.process_llm_decision(
@@ -331,8 +371,14 @@ impl VibePilotOrchestrator {
                             &mut coordinate_calibration_retries,
                             &mut base_click_coordinates,
                         ).await? {
-                            Some(true) => continue,
-                            Some(false) => break,
+                            Some(true) => {
+                                self.config_repo.save_task_graph(task_graph.clone());
+                                continue;
+                            }
+                            Some(false) => {
+                                self.config_repo.save_task_graph(task_graph.clone());
+                                break;
+                            }
                             None => {}
                         }
                     }
@@ -342,7 +388,7 @@ impl VibePilotOrchestrator {
                             action: "ERROR".to_string(),
                             display: format!("LLM error: {}", e),
                         });
-                        sleep(Duration::from_secs(5)).await;
+                        self.cancelable_sleep(Duration::from_secs(5)).await;
                     }
                 }
             } else {
@@ -351,7 +397,7 @@ impl VibePilotOrchestrator {
                     action: "ERROR".to_string(),
                     display: "Failed to capture screen".to_string(),
                 });
-                sleep(Duration::from_secs(2)).await;
+                self.cancelable_sleep(Duration::from_secs(2)).await;
             }
 
             // Save task graph to config repository (if active)
@@ -381,7 +427,7 @@ impl VibePilotOrchestrator {
                 }
             }
 
-            sleep(Duration::from_millis(500)).await;
+            self.cancelable_sleep(Duration::from_millis(500)).await;
         }
 
         // Save final task graph state on loop exit

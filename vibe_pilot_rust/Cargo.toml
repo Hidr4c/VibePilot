@@ -1,6 +1,6 @@
 [package]
 name = "vibepilot"
-version = "1.0.2"
+version = "1.0.1"
 edition = "2021"
 description = "Visual AI automation orchestrator - Rust port"
 license = "MIT"
@@ -47,9 +47,10 @@ aes-gcm = "0.10"
 sha2 = "0.10"
 rand = "0.8"
 tempfile = "3"
+keyring = "3.0"
 
 # Image processing
-image = { version = "0.25", features = ["png"] }
+image = { version = "0.25", features = ["png", "gif"] }
 rusty-tesseract = "1.1"
 
 # Async runtime

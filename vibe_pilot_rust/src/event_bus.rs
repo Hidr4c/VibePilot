@@ -16,6 +16,7 @@ pub enum NotificationEvent {
     Log(String),
     UpdateStatus { text: String, color: String },
     AppendAction { action: String, display: String },
+    AppendActionCrop(Vec<u8>),
     AppendReport(String),
     LoopDetectedAlert { message: String },
     ClearActionConfirmation,
@@ -27,6 +28,7 @@ impl fmt::Display for NotificationEvent {
             NotificationEvent::Log(_) => write!(f, "LOG"),
             NotificationEvent::UpdateStatus { .. } => write!(f, "UPDATE_STATUS"),
             NotificationEvent::AppendAction { .. } => write!(f, "APPEND_ACTION"),
+            NotificationEvent::AppendActionCrop(_) => write!(f, "APPEND_ACTION_CROP"),
             NotificationEvent::AppendReport(_) => write!(f, "APPEND_REPORT"),
             NotificationEvent::LoopDetectedAlert { .. } => write!(f, "LOOP_DETECTED_ALERT"),
             NotificationEvent::ClearActionConfirmation => write!(f, "CLEAR_ACTION_CONFIRMATION"),
@@ -106,6 +108,7 @@ pub enum EventType {
     Log(String),
     UpdateStatus { text: String, color: String },
     AppendAction { action: String, display: String },
+    AppendActionCrop(Vec<u8>),
     AppendReport(String),
     LoopDetectedAlert { message: String },
     ClearActionConfirmation,
@@ -134,6 +137,7 @@ impl fmt::Display for EventType {
             EventType::Log(_) => write!(f, "LOG"),
             EventType::UpdateStatus { .. } => write!(f, "UPDATE_STATUS"),
             EventType::AppendAction { .. } => write!(f, "APPEND_ACTION"),
+            EventType::AppendActionCrop(_) => write!(f, "APPEND_ACTION_CROP"),
             EventType::AppendReport(_) => write!(f, "APPEND_REPORT"),
             EventType::LoopDetectedAlert { .. } => write!(f, "LOOP_DETECTED_ALERT"),
             EventType::ClearActionConfirmation => write!(f, "CLEAR_ACTION_CONFIRMATION"),
@@ -158,6 +162,7 @@ impl From<NotificationEvent> for EventType {
             NotificationEvent::Log(msg) => EventType::Log(msg),
             NotificationEvent::UpdateStatus { text, color } => EventType::UpdateStatus { text, color },
             NotificationEvent::AppendAction { action, display } => EventType::AppendAction { action, display },
+            NotificationEvent::AppendActionCrop(bytes) => EventType::AppendActionCrop(bytes),
             NotificationEvent::AppendReport(report) => EventType::AppendReport(report),
             NotificationEvent::LoopDetectedAlert { message } => EventType::LoopDetectedAlert { message },
             NotificationEvent::ClearActionConfirmation => EventType::ClearActionConfirmation,
@@ -362,6 +367,9 @@ impl EventBus {
             }
             EventType::AppendAction { action, display } => {
                 self.emit_notification(NotificationEvent::AppendAction { action, display });
+            }
+            EventType::AppendActionCrop(bytes) => {
+                self.emit_notification(NotificationEvent::AppendActionCrop(bytes));
             }
             EventType::AppendReport(report) => {
                 self.emit_notification(NotificationEvent::AppendReport(report));

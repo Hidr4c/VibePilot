@@ -43,6 +43,9 @@ impl WaitManager {
         let target_duration = Duration::from_secs(timeout_secs as u64);
         
         while start.elapsed() < target_duration {
+            if bus.emit_query(crate::event_bus::QueryEvent::GetOrchestratorRunning) == "false" {
+                return false;
+            }
             if skip_trigger.load(Ordering::Relaxed) {
                 bus.emit_notification(NotificationEvent::Log("⏳ Wait skipped by user".to_string()));
                 return true;
@@ -75,6 +78,9 @@ impl WaitManager {
         let mut stable_since: Option<Instant> = None;
 
         while start.elapsed() < timeout_duration {
+            if bus.emit_query(crate::event_bus::QueryEvent::GetOrchestratorRunning) == "false" {
+                return false;
+            }
             if skip_trigger.load(Ordering::Relaxed) {
                 bus.emit_notification(NotificationEvent::Log("⏳ Wait skipped by user".to_string()));
                 return true;
@@ -144,6 +150,9 @@ impl WaitManager {
         bus.emit_notification(NotificationEvent::Log(format!("🔍 Waiting for element to appear: '{}'", description)));
         
         while start.elapsed() < timeout_duration {
+            if bus.emit_query(crate::event_bus::QueryEvent::GetOrchestratorRunning) == "false" {
+                return false;
+            }
             if skip_trigger.load(Ordering::Relaxed) {
                 bus.emit_notification(NotificationEvent::Log("⏳ Wait skipped by user".to_string()));
                 return true;

@@ -306,7 +306,7 @@ pub fn render_status_controls(ui: &mut egui::Ui, app: &mut VibePilotApp) {
                 if ui.add(next_btn).clicked() {
                     app.active_tab = Tab::Console;
                 }
-            } else if app.active_tab == Tab::Console {
+            } else if app.active_tab == Tab::Console || app.active_tab == Tab::TaskGraph {
                 if app.is_running {
                     let stop_lbl = if app.current_config.langue == "Français" { "⏹ Arrêter l'Orchestrateur" } else { "⏹ Stop Orchestrator" };
                     let stop_btn = egui::Button::new(egui::RichText::new(stop_lbl).color(egui::Color32::WHITE).strong())

@@ -31,6 +31,7 @@ pub mod app_services;
 pub mod ui;
 pub mod commands;
 pub mod peripheral;
+pub mod macro_recorder;
 
 use master::MasterApp;
 
@@ -53,9 +54,25 @@ fn main() -> eframe::Result {
     };
 
     let rt = tokio::runtime::Runtime::new().expect("Failed to build Tokio runtime for Master");
+    let is_test = cfg!(test)
+        || std::env::var("VIBEPILOT_TEST").is_ok()
+        || std::thread::current().name().unwrap_or("main").contains("test")
+        || std::env::args().skip(1).any(|arg| arg.contains("test"));
+
     let base_dir = match crate::config::load_bootstrap_config().storage_dir {
         Some(dir_str) if !dir_str.is_empty() => std::path::PathBuf::from(&dir_str),
-        _ => std::env::current_dir().unwrap_or_default(),
+        _ => {
+            if is_test {
+                let thread_name = std::thread::current().name().unwrap_or("main").to_string();
+                let safe_name = thread_name.chars()
+                    .filter(|c| c.is_alphanumeric() || *c == '_' || *c == ':')
+                    .map(|c| if c == ':' { '_' } else { c })
+                    .collect::<String>();
+                std::env::temp_dir().join(format!("vibepilot_test_{}", safe_name))
+            } else {
+                std::env::current_dir().unwrap_or_default()
+            }
+        }
     };
     let config_repo = crate::config::ConfigRepositoryFactory::create(base_dir);
 

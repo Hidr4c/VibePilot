@@ -227,3 +227,70 @@ pub async fn navigate_loop_breaker_actions(loop_breaker: &mut LoopBreaker, orche
         _ => {}
     }
 }
+
+/// Crops a 250x250 region centered around the relative coordinates, draws a target crosshair at center, and returns PNG bytes.
+pub fn create_action_crop(img: &image::DynamicImage, rx: f64, ry: f64) -> Option<Vec<u8>> {
+    let width = img.width();
+    let height = img.height();
+    let px = (rx * width as f64).round() as i32;
+    let py = (ry * height as f64).round() as i32;
+    
+    // Crop area dimensions
+    let crop_size = 250u32;
+    let half_size = crop_size / 2;
+    
+    // Compute bounding box for crop, clamping to image boundaries
+    let left = (px - half_size as i32).max(0).min(width as i32 - 1) as u32;
+    let top = (py - half_size as i32).max(0).min(height as i32 - 1) as u32;
+    
+    let w = (crop_size).min(width - left);
+    let h = (crop_size).min(height - top);
+    
+    if w == 0 || h == 0 {
+        return None;
+    }
+    
+    let mut crop = img.crop_imm(left, top, w, h);
+    
+    // Draw crosshair on the crop image. The target coordinates on the crop are (px - left, py - top)
+    let target_rx = (px - left as i32) as f64 / w as f64;
+    let target_ry = (py - top as i32) as f64 / h as f64;
+    
+    draw_click_marker(&mut crop, target_rx, target_ry, &[image::Rgba([255, 0, 0, 255])]);
+    
+    // Encode as PNG
+    let mut buf = Vec::new();
+    let mut cursor = std::io::Cursor::new(&mut buf);
+    if crop.write_to(&mut cursor, image::ImageFormat::Png).is_ok() {
+        Some(buf)
+    } else {
+        None
+    }
+}
+
+impl VibePilotOrchestrator {
+    pub(crate) async fn cancelable_sleep(&self, duration: std::time::Duration) {
+        if duration.is_zero() {
+            return;
+        }
+        #[cfg(test)]
+        {
+            tokio::time::sleep(duration).await;
+            return;
+        }
+        #[cfg(not(test))]
+        {
+            let mut remaining = duration;
+            let step = std::time::Duration::from_millis(100);
+            while remaining > std::time::Duration::ZERO {
+                if self.bus.emit_query(crate::event_bus::QueryEvent::GetOrchestratorRunning) == "false" {
+                    break;
+                }
+                let sleep_time = if remaining > step { step } else { remaining };
+                tokio::time::sleep(sleep_time).await;
+                remaining = remaining.saturating_sub(step);
+            }
+        }
+    }
+}
+

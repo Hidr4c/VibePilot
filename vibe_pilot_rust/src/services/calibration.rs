@@ -102,3 +102,70 @@ impl AutoCalibratorFactory {
         Arc::new(VisualDiffAutoCalibrator::new())
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use image::DynamicImage;
+
+    #[test]
+    fn test_calibration_factory_and_default() {
+        let calibrator = AutoCalibratorFactory::create();
+        let default_calibrator = VisualDiffAutoCalibrator::default();
+        
+        let before = DynamicImage::new_rgba8(10, 10);
+        let after = DynamicImage::new_rgba8(20, 20); // mismatched dimensions
+        
+        let drift = calibrator.calculate_drift(&before, &after, (5, 5));
+        assert!(drift.is_none());
+
+        let drift_default = default_calibrator.calculate_drift(&before, &after, (5, 5));
+        assert!(drift_default.is_none());
+    }
+
+    #[test]
+    fn test_calibration_drift_success() {
+        let calibrator = VisualDiffAutoCalibrator::new();
+        let before = DynamicImage::new_luma8(200, 200);
+        let mut after = DynamicImage::new_luma8(200, 200);
+
+        // Put a change of 50 pixels (cluster) at (100, 100)
+        // Set before pixels to 0, after pixels to 100
+        if let Some(after_img) = after.as_mut_luma8() {
+            for y in 95..105 {
+                for x in 95..100 {
+                    after_img.put_pixel(x, y, image::Luma([100]));
+                }
+            }
+        }
+
+        // target_click at (100, 100)
+        let drift = calibrator.calculate_drift(&before, &after, (100, 100));
+        assert!(drift.is_some());
+        let (dx, dy) = drift.unwrap();
+        // The cluster center is at actual_x = 97, actual_y = 99
+        // dx = 100 - 97 = 3, dy = 100 - 99 = 1.
+        assert_eq!(dx, 3);
+        assert_eq!(dy, 1);
+    }
+
+    #[test]
+    fn test_calibration_drift_too_large() {
+        let calibrator = VisualDiffAutoCalibrator::new();
+        let before = DynamicImage::new_luma8(200, 200);
+        let mut after = DynamicImage::new_luma8(200, 200);
+
+        // Put a change of 50 pixels at (50, 50)
+        if let Some(after_img) = after.as_mut_luma8() {
+            for y in 45..55 {
+                for x in 45..50 {
+                    after_img.put_pixel(x, y, image::Luma([100]));
+                }
+            }
+        }
+
+        // target_click at (100, 100). Drift is (50, 50), which is > 30px.
+        let drift = calibrator.calculate_drift(&before, &after, (100, 100));
+        assert!(drift.is_none());
+    }
+}

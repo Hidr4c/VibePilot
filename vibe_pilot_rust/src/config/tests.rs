@@ -308,3 +308,48 @@ fn test_export_decrypted_journal_success() {
     cleanup("export_journal_success");
 }
 
+#[test]
+fn test_action_logger_rotation() {
+    let dir = temp_dir("logger_rotation");
+    let log_path = dir.join("vibepilot.log");
+    
+    let logger = ActionLogger::new(log_path.clone());
+    
+    let chunk = "a".repeat(100 * 1024); // 100 KB
+    for _ in 0..52 {
+        logger.info(&chunk);
+    }
+    
+    assert!(log_path.exists());
+    let size_before = fs::metadata(&log_path).unwrap().len();
+    assert!(size_before >= 5 * 1024 * 1024);
+    
+    logger.info("trigger rotation");
+    
+    let path_1 = log_path.with_extension("log.1");
+    assert!(path_1.exists());
+    assert!(log_path.exists());
+    
+    let size_new = fs::metadata(&log_path).unwrap().len();
+    assert!(size_new < 1000); 
+    
+    for _ in 0..52 {
+        logger.info(&chunk);
+    }
+    logger.info("trigger rotation 2");
+    
+    let path_2 = log_path.with_extension("log.2");
+    assert!(path_2.exists());
+    assert!(path_1.exists());
+    
+    for _ in 0..52 {
+        logger.info(&chunk);
+    }
+    logger.info("trigger rotation 3");
+    
+    let path_3 = log_path.with_extension("log.3");
+    assert!(path_3.exists());
+    
+    cleanup("logger_rotation");
+}
+

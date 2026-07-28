@@ -36,11 +36,80 @@ pub fn render_console_and_timeline_split(ui: &mut egui::Ui, app: &mut VibePilotA
                     app.action_history.clear();
                     app.logs.clear();
                     app.structured_steps.clear();
+                    app.action_textures.clear();
                 }
 
                 let copy_logs_label = app.t("btn_copy_logs");
                 if ui.button(copy_logs_label).clicked() {
                     copy_logs_to_clipboard(ui.ctx(), &app.logs);
+                }
+
+                let export_gif_10_label = if app.current_config.langue == "Français" { "🎥 GIF (10 Derniers)" } else { "🎥 GIF (Last 10)" };
+                if ui.button(export_gif_10_label).on_hover_text("Export the last 10 screens of execution as an animated GIF").clicked() {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .set_file_name("replay_last_10.gif")
+                        .add_filter("GIF Animation", &["gif"])
+                        .save_file()
+                    {
+                        match app.orchestrator.replay_manager.export_gif(&path) {
+                            Ok(()) => {
+                                let success_msg = if app.current_config.langue == "Français" {
+                                    "Replay exporté en GIF avec succès !"
+                                } else {
+                                    "Replay exported to GIF successfully!"
+                                };
+                                app.bus.emit_notification(NotificationEvent::Log(success_msg.to_string()));
+                            }
+                            Err(e) => {
+                                let err_msg = format!("GIF export error: {}", e);
+                                app.bus.emit_notification(NotificationEvent::Log(err_msg));
+                            }
+                        }
+                    }
+                }
+
+                let export_gif_full_label = if app.current_config.langue == "Français" { "🎬 GIF (Session Complète)" } else { "🎬 GIF (Full Session)" };
+                if ui.button(export_gif_full_label).on_hover_text("Export the entire execution session as an animated GIF").clicked() {
+                    if let Some(path) = rfd::FileDialog::new()
+                        .set_file_name("replay_full_session.gif")
+                        .add_filter("GIF Animation", &["gif"])
+                        .save_file()
+                    {
+                        match app.orchestrator.replay_manager.export_full_session_gif(&path) {
+                            Ok(()) => {
+                                let success_msg = if app.current_config.langue == "Français" {
+                                    "Session complète exportée en GIF avec succès !"
+                                } else {
+                                    "Full session exported to GIF successfully!"
+                                };
+                                app.bus.emit_notification(NotificationEvent::Log(success_msg.to_string()));
+                            }
+                            Err(e) => {
+                                let err_msg = format!("GIF export error: {}", e);
+                                app.bus.emit_notification(NotificationEvent::Log(err_msg));
+                            }
+                        }
+                    }
+                }
+
+                let save_all_label = if app.current_config.langue == "Français" { "📦 Tout Enregistrer" } else { "📦 Save All" };
+                if ui.button(save_all_label).on_hover_text("Save all screenshots, logs, and AI report into a single folder").clicked() {
+                    if let Some(path) = rfd::FileDialog::new().pick_folder() {
+                        match app.orchestrator.replay_manager.export_full_session_archive(&path, &app.logs, &app.report_content) {
+                            Ok(()) => {
+                                let success_msg = if app.current_config.langue == "Français" {
+                                    "Session complète enregistrée avec succès !"
+                                } else {
+                                    "Full session saved successfully!"
+                                };
+                                app.bus.emit_notification(NotificationEvent::Log(success_msg.to_string()));
+                            }
+                            Err(e) => {
+                                let err_msg = format!("Save all error: {}", e);
+                                app.bus.emit_notification(NotificationEvent::Log(err_msg));
+                            }
+                        }
+                    }
                 }
             } else {
                 let clear_report_label = if app.current_config.langue == "Français" { "🗑️ Effacer le Rapport" } else { "🗑️ Clear Report" };
@@ -61,7 +130,7 @@ pub fn render_console_and_timeline_split(ui: &mut egui::Ui, app: &mut VibePilotA
     ui.separator();
 
     let feedback_panel_height = 35.0;
-    let content_height = height - 40.0 - feedback_panel_height - 10.0;
+    let content_height = (height - 40.0 - feedback_panel_height - 10.0).max(50.0);
 
     let colors: std::collections::HashMap<&str, egui::Color32> = [
         ("THINK", egui::Color32::from_rgb(255, 140, 0)),
@@ -83,7 +152,7 @@ pub fn render_console_and_timeline_split(ui: &mut egui::Ui, app: &mut VibePilotA
         .max_height(content_height)
         .stick_to_bottom(app.auto_scroll_logs)
         .show(ui, |ui| {
-            ui.set_min_height(content_height - 15.0);
+            ui.set_min_height((content_height - 15.0).max(0.0));
 
             if app.structured_steps.is_empty() {
                 let empty_msg = if app.current_config.langue == "Français" {
@@ -135,6 +204,25 @@ pub fn render_console_and_timeline_split(ui: &mut egui::Ui, app: &mut VibePilotA
                                                     .monospace()
                                                     .color(egui::Color32::from_rgb(0, 255, 0))
                                             ).wrap());
+                                        }
+
+                                        if let Some(ref bytes) = step.action_image {
+                                            let texture = app.action_textures.entry(i).or_insert_with(|| {
+                                                let img = image::load_from_memory(bytes).unwrap_or_else(|_| image::DynamicImage::new_rgba8(1, 1));
+                                                let size = [img.width() as usize, img.height() as usize];
+                                                let pixels = img.to_rgba8();
+                                                let color_image = egui::ColorImage::from_rgba_unmultiplied(size, &pixels);
+                                                ui.ctx().load_texture(
+                                                    format!("step_crop_{}", i),
+                                                    color_image,
+                                                    Default::default()
+                                                )
+                                            });
+
+                                            ui.add_space(6.0);
+                                            ui.horizontal(|ui| {
+                                                ui.image(&*texture);
+                                            });
                                         }
                                     } else {
                                         // Report view

@@ -44,6 +44,8 @@ pub struct LlmResponse {
     #[serde(default)]
     pub shortcut_name: String,
     #[serde(default)]
+    pub macro_script: String,
+    #[serde(default)]
     pub min_delay_ms: u64,
     #[serde(default)]
     pub max_delay_ms: u64,

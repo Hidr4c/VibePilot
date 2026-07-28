@@ -250,32 +250,19 @@ impl VibePilotOrchestrator {
                 (res.relative_click_position[0], res.relative_click_position[1])
             };
 
-            let is_pixel_or_thousandths = rx > 5.0 || ry > 5.0;
-            if is_pixel_or_thousandths {
-                if rx <= 1000.0 && ry <= 1000.0 && rx > 1.0 && ry > 1.0 {
-                    rx /= 1000.0;
-                    ry /= 1000.0;
-                } else {
-                    if rx > 1.0 {
-                        let target_w = offsets.first().map(|o| o.width).unwrap_or(1920) as f64;
-                        rx /= target_w;
-                    }
-                    if ry > 1.0 {
-                        let target_h = offsets.first().map(|o| o.height).unwrap_or(1080) as f64;
-                        ry /= target_h;
-                    }
-                }
-            }
-            rx = rx.clamp(0.0, 1.0);
-            ry = ry.clamp(0.0, 1.0);
+            let is_relative = rx <= 5.0 && ry <= 5.0;
+            if is_relative {
+                rx = rx.clamp(0.0, 1.0);
+                ry = ry.clamp(0.0, 1.0);
 
-            self.apply_coordinate_calibration(
-                config,
-                &mut rx,
-                &mut ry,
-                base_click_coordinates,
-                coordinate_calibration_retries,
-            );
+                self.apply_coordinate_calibration(
+                    config,
+                    &mut rx,
+                    &mut ry,
+                    base_click_coordinates,
+                    coordinate_calibration_retries,
+                );
+            }
 
             Some((rx, ry))
         } else {
@@ -381,7 +368,19 @@ impl VibePilotOrchestrator {
             }
         }
 
-        match self.handle_decision(*res).await {
+        let handle_res = self.handle_decision(*res).await;
+
+        if config.trace_actions_visuelles {
+            if let Some((rx, ry)) = click_coords {
+                if rx <= 1.0 && ry <= 1.0 {
+                    if let Some(crop_bytes) = crate::orchestrator::helpers::create_action_crop(img, rx, ry) {
+                        self.bus.emit_notification(NotificationEvent::AppendActionCrop(crop_bytes));
+                    }
+                }
+            }
+        }
+
+        match handle_res {
             Ok(()) => {
                 // If using TaskGraph and the action was SUCCESS, it means the current sub-task completed
                 if action_type == "SUCCESS" {
@@ -391,7 +390,7 @@ impl VibePilotOrchestrator {
                             self.bus.emit_notification(NotificationEvent::Log(format!("✅ TaskGraph: Completed task {}.", tid.0)));
                             if !graph.is_complete() {
                                 // More tasks to do! Do not stop the orchestrator loop yet.
-                                sleep(Duration::from_secs(3)).await;
+                                self.cancelable_sleep(Duration::from_secs(3)).await;
                                 return Ok(Some(true));
                             }
                         }
@@ -431,7 +430,7 @@ impl VibePilotOrchestrator {
                         self.bus.emit_notification(NotificationEvent::Log(format!("✅ TaskGraph: Completed task {}.", tid.0)));
                         if !graph.is_complete() {
                             // More tasks to do! Do not stop the orchestrator loop yet.
-                            sleep(Duration::from_secs(3)).await;
+                            self.cancelable_sleep(Duration::from_secs(3)).await;
                             return Ok(Some(true));
                         }
                     }
@@ -460,7 +459,7 @@ impl VibePilotOrchestrator {
                     }
                 }
 
-                sleep(Duration::from_secs(5)).await;
+                self.cancelable_sleep(Duration::from_secs(5)).await;
             }
         }
 

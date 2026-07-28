@@ -48,7 +48,7 @@ if ($currentBranch -ne $FromBranch) {
 
 $statusOutput = git status --porcelain
 if ($statusOutput) {
-    Write-Error "Error: Working tree is not clean. Commit or stash changes first."
+    Write-Error "Error: Working tree is not clean. There are modified or untracked files. Commit, stash, or clean them first."
     exit 1
 }
 
@@ -62,30 +62,40 @@ if (-not $latestReleaseTag) {
 Write-Host "  From branch : $FromBranch" -ForegroundColor White
 Write-Host "  Base tag     : $latestReleaseTag" -ForegroundColor White
 Write-Host "  Release tag  : $tagVersion" -ForegroundColor White
-Write-Host "  Dev tag      : $devTag" -ForegroundColor White
+Write-Host "  Dev tag      : $devTag (local only)" -ForegroundColor White
 Write-Host ""
 
 if ($DryRun) {
     Write-Host "[DRY RUN] Would perform the following:" -ForegroundColor Yellow
-    Write-Host "  1. Tag '$FromBranch' as '$devTag'"
+    Write-Host "  1. Tag '$FromBranch' as '$devTag' (local only)"
     Write-Host "  2. Create branch '$releaseBranch' from '$latestReleaseTag'"
-    Write-Host "  3. Squash merge '$FromBranch' into '$releaseBranch' (1 commit)"
+    Write-Host "  3. Import '$FromBranch' content into '$releaseBranch'"
     Write-Host "  4. Bump Cargo.toml to $plainVersion"
     Write-Host "  5. Build release binaries"
     Write-Host "  6. Package ZIP in release-zip/"
     Write-Host "  7. Tag release commit as '$tagVersion'"
     Write-Host "  8. Update 'latest' branch to point to '$releaseBranch'"
-    Write-Host "  9. Push '$releaseBranch', '$tagVersion', '$devTag', 'latest' to origin"
+    Write-Host "  9. Push '$releaseBranch', '$tagVersion', 'latest' to origin (NO dev tag push)"
     Write-Host " 10. Return to '$FromBranch'"
     exit 0
 }
 
-# --- Step 1: Tag the dev source commit ----------------------------------------
+# --- Confirm release creation -------------------------------------------------
 
-Write-Host "[1/8] Tagging '$FromBranch' as '$devTag'..." -ForegroundColor Green
-git tag -a $devTag -m "Dev snapshot for release $tagVersion"
+$response = Read-Host "Confirmer la creation de la release $tagVersion ? (o/n)"
+if ($response -notmatch '^[oOyY](ui|es)?$') {
+    Write-Host "Creation de la release annulee par l'utilisateur." -ForegroundColor Yellow
+    exit 0
+}
+
+Write-Host ""
+
+# --- Step 1: Tag the dev source commit locally --------------------------------
+
+Write-Host "[1/8] Tagging '$FromBranch' as '$devTag' (local only)..." -ForegroundColor Green
+git tag -f -a $devTag -m "Dev snapshot for release $tagVersion"
 if ($LASTEXITCODE -ne 0) {
-    Write-Error "Failed to create dev tag '$devTag'. It may already exist."
+    Write-Error "Failed to create local dev tag '$devTag'. It may already exist."
     exit 1
 }
 
@@ -95,7 +105,7 @@ Write-Host "[2/8] Creating branch '$releaseBranch' from '$latestReleaseTag'..." 
 git checkout -b $releaseBranch $latestReleaseTag
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Failed to create release branch."
-    git tag -d $devTag  # Rollback dev tag
+    git tag -d $devTag  # Rollback dev tag locally
     exit 1
 }
 
@@ -136,6 +146,9 @@ if (Test-Path $cargoPath) {
     Write-Host "  Updated $cargoPath to version $plainVersion"
 } else {
     Write-Error "Could not find Cargo.toml at $cargoPath"
+    git checkout $FromBranch
+    git branch -D $releaseBranch
+    git tag -d $devTag
     exit 1
 }
 
@@ -149,6 +162,9 @@ Pop-Location
 
 if ($buildResult -ne 0) {
     Write-Error "Release build failed."
+    git checkout $FromBranch
+    git branch -D $releaseBranch
+    git tag -d $devTag
     exit 1
 }
 
@@ -229,6 +245,61 @@ if (Test-Path $zipPath) {
 Write-Host "  Compressing to $zipPath..."
 Compress-Archive -Path "$stagingPath/*" -DestinationPath $zipPath -Force
 
+# --- Generate Release Notes ---------------------------------------------------
+Write-Host "  Generating release notes from git logs..."
+$notesFile = "$releaseZipDir/release_notes_$tagVersion.md"
+
+$logLines = git log "$latestReleaseTag..$FromBranch" --pretty=format:"%s"
+$feats = @()
+$fixes = @()
+$others = @()
+
+foreach ($line in $logLines) {
+    if ($line -match '^Merge ') { continue }
+    if ($line -match '^feat(\(.*\))?:') {
+        $feats += "- " + $line
+    } elseif ($line -match '^fix(\(.*\))?:') {
+        $fixes += "- " + $line
+    } else {
+        if ($line -notmatch '^(chore|test|docs|style|refactor)(\(.*\))?:') {
+            $others += "- " + $line
+        }
+    }
+}
+
+$notes = "# VibePilot $tagVersion`n`n"
+$notes += "## New Features & Enhancements`n`n"
+if ($feats.Count -gt 0) {
+    $notes += ($feats -join "`n") + "`n`n"
+} else {
+    $notes += "- No major changes.`n`n"
+}
+
+if ($fixes.Count -gt 0) {
+    $notes += "## Bug Fixes`n`n" + ($fixes -join "`n") + "`n`n"
+}
+
+if ($others.Count -gt 0) {
+    $notes += "## Other Changes`n`n" + ($others -join "`n") + "`n`n"
+}
+
+# Add included files section
+$notes += "## Included Files`n`n"
+$notes += "- vibepilot-v$plainVersion-windows-x64.zip — Complete pre-configured archive with profiles.`n"
+$notes += "- vibepilot.exe — Standalone worker executable (no installation required).`n"
+$notes += "- vibepilot_master.exe — Master Grid UI interface.`n`n"
+
+# Add prerequisites section
+$notes += "## Prerequisites`n`n"
+$notes += "- Windows 10 or 11`n"
+$notes += "- A local LLM server (LM Studio, Ollama) or an OpenAI-compatible API.`n"
+
+$notes | Out-File -FilePath $notesFile -Encoding utf8
+
+# Open release notes in Notepad for review/modification
+Write-Host "Opening release notes in Notepad for your review/edit. Please save and close to proceed..." -ForegroundColor Cyan
+Start-Process notepad.exe -ArgumentList $notesFile -Wait
+
 # --- Step 7: Commit & Tag ----------------------------------------------------
 
 Write-Host "[7/8] Committing squashed release and tagging $tagVersion..." -ForegroundColor Green
@@ -238,12 +309,18 @@ git add -A
 git commit --no-verify -m "Release $tagVersion"
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Failed to commit squashed release."
+    git checkout $FromBranch
+    git branch -D $releaseBranch
+    git tag -d $devTag
     exit 1
 }
 
-git tag -a $tagVersion -m "Release $tagVersion"
+git tag -f -a $tagVersion -m "Release $tagVersion"
 if ($LASTEXITCODE -ne 0) {
     Write-Error "Failed to create release tag."
+    git checkout $FromBranch
+    git branch -D $releaseBranch
+    git tag -d $devTag
     exit 1
 }
 
@@ -261,15 +338,114 @@ if ($latestBranchExists) {
     git checkout -b latest $releaseBranch
 }
 
-# Push everything
+# Push everything (excluding local devTag)
 Write-Host "  Pushing release branch..."
 git push origin $releaseBranch
 Write-Host "  Pushing release tag..."
 git push origin $tagVersion
-Write-Host "  Pushing dev tag..."
-git push origin $devTag
 Write-Host "  Pushing latest branch..."
 git push origin latest --force
+
+# Create GitHub Release using GitHub CLI (gh) if available, or fallback to REST API
+if (Get-Command gh -ErrorAction SilentlyContinue) {
+    Write-Host "Creating GitHub Release via 'gh' CLI..."
+    gh release create $tagVersion --title "VibePilot $tagVersion" --notes-file $notesFile "vibe_pilot_rust/target/release/dist/vibepilot.exe" "vibe_pilot_rust/target/release/dist/vibepilot_master.exe" "$zipPath"
+    Write-Host "Release created successfully on GitHub!"
+} else {
+    Write-Host "GitHub CLI ('gh') not found. Attempting to publish release via GitHub API using Git credentials..." -ForegroundColor Yellow
+    
+    # Read release notes file using UTF-8 to preserve accents
+    $notesContent = ""
+    if (Test-Path $notesFile) {
+        $notesContent = [System.IO.File]::ReadAllText($notesFile, [System.Text.Encoding]::UTF8)
+    }
+
+    # Extract GitHub Token from Git credentials
+    $gitToken = ""
+    try {
+        $credInput = "protocol=https`nhost=github.com"
+        $credOutput = $credInput | git credential fill
+        foreach ($line in $credOutput) {
+            if ($line -match '^password=(.*)') {
+                $gitToken = $Matches[1].Trim()
+            }
+        }
+    } catch {
+        Write-Warning "Could not retrieve Git credentials."
+    }
+
+    # Extract owner and repo from origin URL
+    $owner = "Hidr4c"
+    $repo = "VibePilot"
+    try {
+        $remoteUrl = git remote get-url origin
+        if ($remoteUrl -match 'github\.com[:/]([^/]+)/([^.]+)') {
+            $owner = $Matches[1].Trim()
+            $repo = $Matches[2].Trim()
+        }
+    } catch {}
+
+    if ($gitToken) {
+        $headers = @{
+            "Authorization" = "Bearer $gitToken"
+            "Accept" = "application/vnd.github+json"
+            "X-GitHub-Api-Version" = "2022-11-28"
+        }
+        
+        $body = @{
+            tag_name = $tagVersion
+            target_commitish = $releaseBranch
+            name = "VibePilot $tagVersion"
+            body = $notesContent
+            draft = $false
+            prerelease = $false
+            make_latest = "true"
+        } | ConvertTo-Json -Depth 10
+
+        # Create release on GitHub
+        Write-Host "  Creating release $tagVersion via GitHub REST API..." -ForegroundColor Cyan
+        try {
+            $releaseResponse = Invoke-RestMethod -Uri "https://api.github.com/repos/$owner/$repo/releases" -Method Post -Body $body -Headers $headers -ContentType "application/json; charset=utf-8"
+            $releaseId = $releaseResponse.id
+            Write-Host "  Release created successfully (ID: $releaseId)!" -ForegroundColor Green
+
+            # Upload Assets Helper
+            function Upload-Release-Asset($filePath, $contentType, $fileName) {
+                if (Test-Path $filePath) {
+                    Write-Host "  Uploading asset $fileName..." -ForegroundColor Cyan
+                    $bytes = [System.IO.File]::ReadAllBytes($filePath)
+                    $uploadUri = "https://uploads.github.com/repos/$owner/$repo/releases/$releaseId/assets?name=$fileName"
+                    
+                    try {
+                        $uploadResponse = Invoke-RestMethod -Uri $uploadUri -Method Post -Body $bytes -Headers $headers -ContentType $contentType
+                        Write-Host "    Uploaded: $($uploadResponse.browser_download_url)" -ForegroundColor Green
+                    } catch {
+                        Write-Error "    Failed to upload $fileName: $_"
+                    }
+                } else {
+                    Write-Warning "    Asset not found: $filePath"
+                }
+            }
+
+            # Upload assets
+            Upload-Release-Asset "$zipPath" "application/zip" "vibepilot-$tagVersion-windows-x64.zip"
+            Upload-Release-Asset "vibe_pilot_rust/target/release/dist/vibepilot.exe" "application/octet-stream" "vibepilot.exe"
+            Upload-Release-Asset "vibe_pilot_rust/target/release/dist/vibepilot_master.exe" "application/octet-stream" "vibepilot_master.exe"
+            Write-Host "All assets uploaded successfully!" -ForegroundColor Green
+        } catch {
+            Write-Error "Failed to create release via API: $_"
+            if ($_.Exception.Response) {
+                $reader = New-Object System.IO.StreamReader($_.Exception.Response.GetResponseStream())
+                $errBody = $reader.ReadToEnd()
+                Write-Error "Response body: $errBody"
+            }
+        }
+    } else {
+        Write-Warning "Could not find a valid GitHub token in Git credentials. Skipping API release creation."
+        Write-Host "You can manually upload the binaries from: vibe_pilot_rust/target/release/dist or release ZIP: $zipPath"
+        Write-Host "A release note summary has been generated for you at: $notesFile" -ForegroundColor Cyan
+    }
+}
 
 # --- Return to dev -----------------------------------------------------------
 
@@ -282,9 +458,10 @@ Write-Host "  [OK] Release $tagVersion created successfully!" -ForegroundColor G
 Write-Host "=======================================================" -ForegroundColor Green
 Write-Host ""
 Write-Host "  Summary:" -ForegroundColor White
-Write-Host "    Dev tag      : $devTag (on '$FromBranch')" -ForegroundColor Gray
+Write-Host "    Dev tag      : $devTag (local only)" -ForegroundColor Gray
 Write-Host "    Release tag  : $tagVersion (on '$releaseBranch')" -ForegroundColor Gray
 Write-Host "    Branch       : $releaseBranch (1 squashed commit)" -ForegroundColor Gray
 Write-Host "    Latest       : aligned to $releaseBranch" -ForegroundColor Gray
-Write-Host "    ZIP          : $zipPath" -ForegroundColor Gray
+Write-Host "    ZIP          : $zipPath
+    Notes        : $notesFile" -ForegroundColor Gray
 Write-Host ""

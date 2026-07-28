@@ -62,14 +62,16 @@ impl ConfigService {
     }
 
     pub fn get_first_available_profile_name(&self) -> String {
-        let existing_profiles = self.list_profiles();
-        for i in 1..=9995 {
+        use std::collections::HashSet;
+        let existing_profiles: HashSet<String> = self.list_profiles().into_iter().collect();
+        let mut i = 1;
+        loop {
             let name = format!("profile_{:02}", i);
             if !existing_profiles.contains(&name) {
                 return name;
             }
+            i += 1;
         }
-        "profile_9995".to_string()
     }
 
     pub fn reset_all_settings(&mut self) {
@@ -88,6 +90,7 @@ impl ConfigService {
         reset.theme_sombre = true;
         reset.prompt_reprise = None;
         reset.zoom_facteur = None;
+        reset.trace_actions_visuelles = false;
         self.config_repo.save_config(&reset);
     }
 }

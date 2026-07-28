@@ -218,6 +218,7 @@ pub struct SavedConfig {
     pub roi_width: i32,
     pub roi_height: i32,
     pub chiffrement_dpapi: bool,
+    pub trace_actions_visuelles: bool,
 }
 
 impl Default for SavedConfig {
@@ -287,6 +288,7 @@ impl Default for SavedConfig {
             roi_width: 1920,
             roi_height: 1080,
             chiffrement_dpapi: false,
+            trace_actions_visuelles: false,
         }
     }
 }

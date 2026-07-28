@@ -10,17 +10,17 @@ fn main() {
     println!("cargo:rerun-if-changed=.git/refs/heads/");
     println!("cargo:rerun-if-changed=.git/refs/tags/");
 
+    // Register custom cfg conditions to suppress compiler warnings about unexpected cfgs
+    println!("cargo:rustc-check-cfg=cfg(tarpaulin)");
+
     // Get current git branch
-    let branch = get_git_branch();
-    println!("cargo:warning=[vibepilot] Building from branch: {}", branch);
+    let _branch = get_git_branch();
 
     // Get latest tag
     let tag = get_latest_tag();
-    println!("cargo:warning=[vibepilot] Latest tag: {}", tag);
 
     // Get short commit hash
     let hash = get_git_hash();
-    println!("cargo:warning=[vibepilot] Git hash: {}", hash);
 
     // Set environment variables for the Rust compiler
     println!("cargo:rustc-env=GIT_HASH={}", hash);

@@ -431,6 +431,14 @@ impl VibePilotOrchestrator {
             && !self.controller.is_desktop_title(&config.fenetres_surveillees[0]);
 
         if is_specific_window {
+            // If the user has focused the VibePilot window, do not steal focus back
+            if let Some(fg_title) = self.capturer.get_foreground_window_title() {
+                if fg_title.contains("VibePilot") {
+                    sleep(Duration::from_millis(300)).await;
+                    return true; // continue outer loop
+                }
+            }
+
             let target_title = &config.fenetres_surveillees[0];
             let anchor_result = self.capturer.ensure_window_foreground(target_title);
             match anchor_result {
